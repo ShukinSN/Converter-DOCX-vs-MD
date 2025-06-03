@@ -44,9 +44,9 @@ python -m src.main
 ## Сборка исполняемых файлов
 
 Инструкции для сборки исполняемых файлов для разных операционных систем находятся в папке `docs`:
-- [Windows 10/11](docs/build_windows.md)
-- [Linux (Ubuntu/Debian)](docs/build_linux.md)
-- [macOS](docs/build_macos.md)
+- [Windows 10/11]([docs/build](https://github.com/ShukinSN/Converter-DOCX-vs-MD/blob/main/docs/build_windows.md)
+- [Linux (Ubuntu/Debian)]([docs/build_linux.md](https://github.com/ShukinSN/Converter-DOCX-vs-MD/blob/main/docs/build_linux.markdown))
+- [macOS]([docs/](https://github.com/ShukinSN/Converter-DOCX-vs-MD/blob/main/docs/build_macos.markdown)
 
 ## Устранение неполадок
 
