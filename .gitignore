@@ -6,3 +6,6 @@
 venv/
 .env
 *.log
+build/
+dist/
+*.spec
