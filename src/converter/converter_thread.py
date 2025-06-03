@@ -29,8 +29,7 @@ class EnhancedConverterThread(QThread):
         self._is_running = True
         self.processed_images = set()
 
-    def run(self):
-        """Основной процесс конвертации с улучшенной обработкой ошибок."""
+    def run(self):  # Основной процесс конвертации с обработкой ошибок.
         total_files = len(self.files)
         success_count = 0
 
@@ -82,16 +81,15 @@ class EnhancedConverterThread(QThread):
 
                 success_count += 1
                 self.conversion_finished.emit(
-                    filename, f"✅ Успешно: {safe_name}.md", output_path
+                    filename, f"Успешно: {safe_name}.md", output_path
                 )
 
             except Exception as e:
-                error_msg = f"❌ Ошибка ({filename}): {str(e)}"
+                error_msg = f"Ошибка ({filename}): {str(e)}"
                 self.error_occurred.emit(error_msg)
                 self.conversion_finished.emit(filename, error_msg, "")
 
         self.finished_all.emit(success_count)
 
-    def stop(self):
-        """Безопасная остановка потока."""
+    def stop(self):  # Безопасная остановка потока.
         self._is_running = False

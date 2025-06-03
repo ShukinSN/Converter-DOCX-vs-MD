@@ -12,8 +12,9 @@ from PyQt5.QtGui import QFont
 import markdown
 
 
-class ModernPreviewWindow(QWidget):
-    """Современное окно предпросмотра с подсветкой синтаксиса."""
+class ModernPreviewWindow(
+    QWidget
+):  # Современное окно предпросмотра с подсветкой синтаксиса.
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,28 +54,28 @@ class ModernPreviewWindow(QWidget):
         self.save_btn.clicked.connect(self.save_content)
         self.close_btn.clicked.connect(self.close)
 
-    def set_content(self, text):
-        """Установка содержимого для предпросмотра."""
+    def set_content(self, text):  # Установка содержимого для предпросмотра.
+
         self.raw_edit.setPlainText(text)
         html = markdown.markdown(text, extensions=["fenced_code", "codehilite"])
         self.rendered_view.setHtml(f"{html}")
 
-    def copy_markdown(self):
-        """Копирование Markdown в буфер обмена."""
+    def copy_markdown(self):  # Копирование Markdown в буфер обмена.
+
         clipboard = self.parent().QApplication.clipboard()
         clipboard.setText(self.raw_edit.toPlainText())
         QMessageBox.information(
             self, "Скопировано", "Markdown скопирован в буфер обмена"
         )
 
-    def copy_html(self):
-        """Копирование HTML в буфер обмена."""
+    def copy_html(self):  # Копирование HTML в буфер обмена.
+
         clipboard = self.parent().QApplication.clipboard()
         clipboard.setText(self.rendered_view.toHtml())
         QMessageBox.information(self, "Скопировано", "HTML скопирован в буфер обмена")
 
-    def save_content(self):
-        """Сохранение содержимого в файл."""
+    def save_content(self):  #  Сохранение содержимого в файл.
+
         formats = {
             "Markdown (*.md)": lambda: self.raw_edit.toPlainText(),
             "HTML (*.html)": lambda: self.rendered_view.toHtml(),

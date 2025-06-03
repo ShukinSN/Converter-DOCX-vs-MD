@@ -8,8 +8,7 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="wand.*")
 
 
-def sanitize_filename(name):
-    """Очищает имя файла от недопустимых символов."""
+def sanitize_filename(name):  # Очищает имя файла от недопустимых символов.
     return re.sub(r'[\\/*?:"<>|]', "_", name)
 
 
