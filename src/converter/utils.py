@@ -9,11 +9,13 @@ warnings.filterwarnings("ignore", category=UserWarning, module="wand.*")
 
 
 def sanitize_filename(name):  # Очищает имя файла от недопустимых символов.
-    return re.sub(r'[\\/*?:"<>|]', "_", name)
+    return re.sub(
+        r'[\\/*?:"<>|]', "_", name
+    )  # это выражение "очищает" строку, заменяя недопустимые символы на подчёркивания.
 
 
-def convert_emf_to_png(emf_path):
-    """Конвертирует файл EMF в PNG с помощью Wand."""
+def convert_emf_to_png(emf_path):  # Конвертирует файл EMF в PNG с помощью Wand.
+
     try:
         png_path = os.path.splitext(emf_path)[0] + ".png"
         with Image(filename=emf_path) as img:
@@ -24,8 +26,10 @@ def convert_emf_to_png(emf_path):
         raise Exception(f"Ошибка конвертации EMF в PNG: {str(e)}")
 
 
-def process_images(md_path, temp_dir):
-    """Обработка изображений в Markdown файле, перемещение их в папку images и обновление ссылок."""
+def process_images(
+    md_path, temp_dir
+):  # Обработка изображений в Markdown файле, перемещение их в папку images и обновление ссылок.
+
     md_dir = os.path.dirname(md_path)
     images_folder = os.path.join(md_dir, "images")
     os.makedirs(images_folder, exist_ok=True)
@@ -36,10 +40,9 @@ def process_images(md_path, temp_dir):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     img_patterns = [
-        (r"!\[([^\]]*)\]\(([^)]+)\)", True),  # Markdown
-        (r'<img[^>]+src="([^"]+)"[^>]*>', False),  # HTML
+        (r"!\[([^\]]*)\]\(([^)]+)\)", True),  # поиск изображений в Markdown
+        (r'<img[^>]+src="([^"]+)"[^>]*>', False),  # поиск изображений в HTML
     ]
-
     for pattern, is_markdown in img_patterns:
 
         def replacer(match):
@@ -93,15 +96,17 @@ def process_images(md_path, temp_dir):
         f.write(content)
 
 
-def fix_links_and_toc(md_path):
-    """Исправление ссылок и оглавления в Markdown файле."""
+def fix_links_and_toc(
+    md_path,
+):  # Исправление ссылок и оглавления в Markdown файле.
+
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
 
     content = re.sub(
         r"\[([^\]]+)\]\(([^)]+)\)",
         lambda m: f'[{m.group(1)}]({m.group(2).replace(" ", "%20")})',
-        content,
+        content,  # Этот код исправляет Markdown-ссылки, заменяя пробелы в URL на %20, чтобы они корректно работали в браузерах и других системах.
     )
 
     toc_entries = []
@@ -109,12 +114,18 @@ def fix_links_and_toc(md_path):
     def toc_replacer(match):
         level = len(match.group(1))
         title = match.group(2).strip()
-        anchor = re.sub(r"[^\w\s-]", "", title.lower(), flags=re.UNICODE)
-        anchor = re.sub(r"\s+", "-", anchor).strip("-")
+        anchor = re.sub(
+            r"[^\w\s-]", "", title.lower(), flags=re.UNICODE
+        )  # очищает строку от "лишних" символов
+        anchor = re.sub(r"\s+", "-", anchor).strip(
+            "-"
+        )  # 1. Заменяет все пробельные последовательности на дефисы 2. Удаляет дефисы в начале и конце строки
         toc_entries.append((level, title, anchor))
         return f'<a id="{anchor}"></a>\n{match.group(0)}'
 
-    content = re.sub(r"^(#+)\s+(.+)$", toc_replacer, content, flags=re.MULTILINE)
+    content = re.sub(
+        r"^(#+)\s+(.+)$", toc_replacer, content, flags=re.MULTILINE
+    )  # Обработка заголовков
 
     toc_content = "## Оглавление\n\n" + "\n".join(
         f"{'    '*(level-1)}- [{title}](#{anchor})"
@@ -128,8 +139,10 @@ def fix_links_and_toc(md_path):
         f.write(content)
 
 
-def replace_image_links(md_path, replacement_rules=None):
-    """Замена ссылок на изображения по заданным правилам."""
+def replace_image_links(
+    md_path, replacement_rules=None
+):  # Замена ссылок на изображения по заданным правилам.
+
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -150,8 +163,12 @@ def replace_image_links(md_path, replacement_rules=None):
         new_path_part = rules.get(path_part, path_part)
         return match.group(0).replace(old_path, new_path_part + params)
 
-    content = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", md_replacer, content)
-    content = re.sub(r'<img[^>]+src="([^"]+)"[^>]*>', html_replacer, content)
+    content = re.sub(
+        r"!\[([^\]]*)\]\(([^)]+)\)", md_replacer, content
+    )  # замена ссылок в Markdown
+    content = re.sub(
+        r'<img[^>]+src="([^"]+)"[^>]*>', html_replacer, content
+    )  # замена ссылок в HTML
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)
