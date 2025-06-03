@@ -30,6 +30,7 @@ class EnhancedConverterThread(QThread):
         self.processed_images = set()
 
     def run(self):  # Основной процесс конвертации с обработкой ошибок.
+
         total_files = len(self.files)
         success_count = 0
 
@@ -41,6 +42,14 @@ class EnhancedConverterThread(QThread):
             self.progress_updated.emit(int((i + 1) / total_files * 100), filename)
 
             try:
+                if not os.access(input_path, os.R_OK):
+                    raise PermissionError(f"Нет прав на чтение файла: {filename}")
+
+                if not os.access(self.output_folder, os.W_OK):
+                    raise PermissionError(
+                        f"Нет прав на запись в папку: {self.output_folder}"
+                    )
+
                 if not os.path.exists(input_path):
                     raise FileNotFoundError(f"Файл не найден: {filename}")
 
