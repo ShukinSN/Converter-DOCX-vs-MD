@@ -24,9 +24,9 @@ from src.gui.preview_window import ModernPreviewWindow
 import pypandoc
 
 
-class DocxToMarkdownConverter(QMainWindow):
-    """Главное окно приложения с современным интерфейсом."""
-
+class DocxToMarkdownConverter(
+    QMainWindow
+):  # Главное окно приложения с современным интерфейсом.
     def __init__(self):
         super().__init__()
         self.thread = None
@@ -36,8 +36,7 @@ class DocxToMarkdownConverter(QMainWindow):
         self.load_settings()
         QTimer.singleShot(100, self.check_pandoc_installation)
 
-    def init_ui(self):
-        """Инициализация пользовательского интерфейса."""
+    def init_ui(self):  # Инициализация пользовательского интерфейса.
         self.setWindowTitle("DOCX to Markdown Converter Pro")
         self.setGeometry(100, 100, 900, 700)
 
@@ -119,8 +118,8 @@ class DocxToMarkdownConverter(QMainWindow):
         self.cancel_btn.clicked.connect(self.cancel_conversion)
         self.file_list.itemDoubleClicked.connect(self.preview_file)
 
-    def check_pandoc_installation(self):
-        """Проверка наличия Pandoc."""
+    def check_pandoc_installation(self):  # Проверка наличия Pandoc.
+
         try:
             pypandoc.get_pandoc_version()
         except OSError:
@@ -131,8 +130,8 @@ class DocxToMarkdownConverter(QMainWindow):
                 "Установите его с официального сайта: https://pandoc.org/installing.html",
             )
 
-    def add_files(self):
-        """Добавление файлов через диалог."""
+    def add_files(self):  # Добавление файлов через диалог.
+
         files, _ = QFileDialog.getOpenFileNames(
             self, "Выберите DOCX файлы", "", "Документы Word (*.docx);;Все файлы (*)"
         )
@@ -147,8 +146,8 @@ class DocxToMarkdownConverter(QMainWindow):
                     item.setToolTip(f)
                     self.file_list.addItem(item)
 
-    def add_folder(self):
-        """Добавление всех DOCX из папки."""
+    def add_folder(self):  # Добавление всех DOCX из папки.
+
         folder = QFileDialog.getExistingDirectory(self, "Выберите папку с документами")
         if folder:
             existing = {
@@ -163,23 +162,23 @@ class DocxToMarkdownConverter(QMainWindow):
                             item.setToolTip(path)
                             self.file_list.addItem(item)
 
-    def remove_selected(self):
-        """Удаление выбранных файлов из списка."""
+    def remove_selected(self):  # Удаление выбранных файлов из списка.
+
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
 
-    def clear_list(self):
-        """Очистка всего списка файлов."""
+    def clear_list(self):  # Очистка всего списка файлов.
+
         self.file_list.clear()
 
-    def select_output(self):
-        """Выбор папки для сохранения."""
+    def select_output(self):  # Выбор папки для сохранения.
+
         path = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения")
         if path:
             self.output_path_edit.setText(path)
 
-    def preview_file(self, item):
-        """Предпросмотр выбранного файла."""
+    def preview_file(self, item):  # редпросмотр выбранного файла.
+
         if self.preview_window is None:
             self.preview_window = ModernPreviewWindow(self)
 
@@ -194,8 +193,8 @@ class DocxToMarkdownConverter(QMainWindow):
                 self, "Ошибка предпросмотра", f"Не удалось открыть файл:\n{str(e)}"
             )
 
-    def start_conversion(self):
-        """Запуск процесса конвертации."""
+    def start_conversion(self):  # Запуск процесса конвертации.
+
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "Нет файлов", "Добавьте файлы для конвертации")
             return
@@ -240,13 +239,13 @@ class DocxToMarkdownConverter(QMainWindow):
 
         self.thread.start()
 
-    def update_progress(self, value, filename):
-        """Обновление прогресс-бара."""
+    def update_progress(self, value, filename):  # Oбновление прогресс-бара.
+
         self.progress.setValue(value)
         self.progress.setFormat(f"{filename} — {value}%")
 
-    def log_result(self, filename, message, output_path):
-        """Логирование результата."""
+    def log_result(self, filename, message, output_path):  # Логирование результата.
+
         if output_path:
             self.log.append(f"<font color='green'>{message}</font>")
             self.log.append(f"<font color='gray'>Сохранено в: {output_path}</font><br>")
@@ -255,13 +254,13 @@ class DocxToMarkdownConverter(QMainWindow):
 
         self.log.moveCursor(QTextCursor.End)
 
-    def log_error(self, message):
-        """Логирование ошибки."""
+    def log_error(self, message):  # Логирование ошибки.
+
         self.log.append(f"<font color='red'>{message}</font><br>")
         self.log.moveCursor(QTextCursor.End)
 
-    def finalize_conversion(self, success_count):
-        """Завершение процесса конвертации."""
+    def finalize_conversion(self, success_count):  # Завершение процесса конвертации.
+
         total = self.file_list.count()
         self.progress.setFormat(f"Готово! Успешно: {success_count}/{total}")
         self.progress.setValue(100)
@@ -276,8 +275,8 @@ class DocxToMarkdownConverter(QMainWindow):
                 f"Успешно обработано {success_count} из {total} файлов",
             )
 
-    def cancel_conversion(self):
-        """Отмена конвертации."""
+    def cancel_conversion(self):  # Отмена конвертации.
+
         if self.thread and self.thread.isRunning():
             self.thread.stop()
             self.thread.wait()
@@ -291,8 +290,8 @@ class DocxToMarkdownConverter(QMainWindow):
             self.convert_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
 
-    def load_settings(self):
-        """Загрузка сохраненных настроек."""
+    def load_settings(self):  # Загрузка сохраненных настроек.
+
         self.output_path_edit.setText(self.settings.value("output_path", ""))
         self.toc_cb.setChecked(self.settings.value("toc", False, type=bool))
         self.overwrite_cb.setChecked(self.settings.value("overwrite", False, type=bool))
@@ -303,16 +302,16 @@ class DocxToMarkdownConverter(QMainWindow):
             self.settings.value("preserve_tabs", False, type=bool)
         )
 
-    def save_settings(self):
-        """Сохранение текущих настроек."""
+    def save_settings(self):  # Сохранение текущих настроек.
+
         self.settings.setValue("output_path", self.output_path_edit.text())
         self.settings.setValue("toc", self.toc_cb.isChecked())
         self.settings.setValue("overwrite", self.overwrite_cb.isChecked())
         self.settings.setValue("smart_quotes", self.smart_quotes_cb.isChecked())
         self.settings.setValue("preserve_tabs", self.preserve_tabs_cb.isChecked())
 
-    def closeEvent(self, event):
-        """Обработка закрытия окна."""
+    def closeEvent(self, event):  # Обработка закрытия окна.
+
         self.save_settings()
         if self.thread and self.thread.isRunning():
             self.thread.stop()

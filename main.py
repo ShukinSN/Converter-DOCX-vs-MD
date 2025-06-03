@@ -1,3 +1,5 @@
+# Copyright (c) 2025 [Schukin Sergey or CPA]
+# Licensed under the MIT License. See LICENSE file in the project root for details.
 import os
 import sys
 from PyQt5.QtWidgets import QApplication
