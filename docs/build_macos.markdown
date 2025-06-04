@@ -36,7 +36,7 @@
 
 1. Выполните команду для сборки:
    ```bash
-   pyinstaller --onefile --windowed --name docx2md --add-data "src:src" main.py
+   pyinstaller --onefile --windowed --name docx2md --add-data "src:src" src/main.py
    ```
 
    - `--onefile`: Создаёт единый исполняемый файл.

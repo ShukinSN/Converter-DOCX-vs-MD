@@ -1,131 +1,60 @@
-DOCX to Markdown Converter Pro
+# DOCX to Markdown Converter Pro
 
-Overview
+Приложение на базе PyQt5 для конвертации файлов DOCX в Markdown с современным графическим интерфейсом, функцией предпросмотра и обработкой изображений.
 
-This is a Python-based application for converting DOCX files to Markdown format. It features a modern GUI built with PyQt5, supports batch processing, image handling, and table of contents generation.
+## Описание
 
-Features
+Приложение позволяет конвертировать файлы Microsoft Word (DOCX) в Markdown с поддержкой:
+- Графического интерфейса с тёмной темой.
+- Предпросмотра Markdown и HTML.
+- Автоматической обработки изображений (включая конвертацию EMF в PNG).
+- Генерации оглавления и исправления ссылок.
+- Многопоточной обработки файлов.
 
+## Требования
 
+- **Python 3.8+**: Установите с [python.org](https://www.python.org/downloads/).
+- **Pandoc 2.14+**: Установите с [pandoc.org](https://pandoc.org/installing.html).
+- **ImageMagick**: Необходим для конвертации EMF в PNG. Установите с [imagemagick.org](https://imagemagick.org/script/download.php).
 
+## Установка
 
+1. Клонируйте репозиторий:
+   ```bash
+   git clone https://github.com/your-username/docx-to-markdown-converter.git
+   cd docx-to-markdown-converter
+   ```
 
-Convert multiple DOCX files to Markdown with customizable settings.
+2. Установите зависимости:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
+3. (Опционально) Установите инструменты для разработки:
+   ```bash
+   pip install pyinstaller pytest
+   ```
 
+## Запуск без сборки
 
-Support for extracting and converting images (including EMF to PNG).
+Для запуска приложения без создания исполняемого файла:
+```bash
+python -m src.main
+```
 
+## Сборка исполняемых файлов
 
+Инструкции для сборки исполняемых файлов для разных операционных систем находятся в папке `docs`:
+- [Windows 10/11](docs/build_windows.md)
+- [Linux (Ubuntu/Debian)](docs/build_linux.md)
+- [macOS](docs/build_macos.md)
 
-Generate table of contents with anchor links.
+## Устранение неполадок
 
+- **Pandoc не найден**: Убедитесь, что Pandoc установлен и добавлен в PATH.
+- **Ошибки ImageMagick с EMF**: Проверьте, установлен ли ImageMagick, и разрешите обработку EMF в настройках (`/etc/ImageMagick-6/policy.xml` на Linux).
+- **Ошибки PyQt5**: Убедитесь, что установлена совместимая версия (`pip install PyQt5>=5.15`).
 
-
-Preview Markdown and HTML output.
-
-
-
-Dark theme interface for better user experience.
-
-Requirements
-
-
-
-
-
-Python 3.6+
-
-
-
-Pandoc (version 2.14 or higher)
-
-
-
-Required Python packages:
-
-pip install pypandoc markdown bs4 PyQt5 wand
-
-Installation
-
-
-
-
-
-Install Pandoc from https://pandoc.org/installing.html.
-
-
-
-Install Python dependencies:
-
-pip install -r requirements.txt
-
-
-
-Clone the repository and navigate to the project directory.
-
-Usage
-
-
-
-
-
-Run the application:
-
-python main.py
-
-
-
-Add DOCX files or folders using the GUI.
-
-
-
-Select an output folder and configure conversion settings (e.g., generate TOC, overwrite files).
-
-
-
-Click "Start Conversion" to process the files.
-
-
-
-View logs and preview converted files.
-
-Project Structure
-
-
-
-
-
-main.py: Entry point of the application.
-
-
-
-src/converter/: Contains conversion logic (thread.py, utils.py).
-
-
-
-src/dependencies/: Dependency checking (checker.py).
-
-
-
-src/gui/: GUI components (main_window.py, palette.py, preview_window.py).
-
-Notes
-
-
-
-
-
-Ensure Pandoc is installed and accessible in your system PATH.
-
-
-
-The application supports .docx files and processes images in .png, .jpg, .jpeg, .gif, and .emf formats.
-
-
-
-Logs are displayed in the GUI, and errors are reported via message boxes.
-
-License
+## Лицензия
 
 MIT License
