@@ -3,9 +3,9 @@
 import os
 import sys
 from PyQt5.QtWidgets import QApplication
-from src.gui.palette import DarkPalette
-from src.gui.main_window import DocxToMarkdownConverter
-from src.dependencies.checker import DependencyChecker
+from gui.palette import DarkPalette
+from gui.main_window import DocxToMarkdownConverter
+from dependencies.checker import DependencyChecker
 
 
 def main():

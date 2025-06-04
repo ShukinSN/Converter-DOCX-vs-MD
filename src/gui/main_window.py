@@ -19,9 +19,14 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QSettings, QTimer
 from PyQt5.QtGui import QIcon, QFont, QTextCursor
-from src.converter.converter_thread import EnhancedConverterThread
-from src.gui.preview_window import ModernPreviewWindow
+
+# from src.converter.converter_thread import EnhancedConverterThread
+from converter.converter_thread import EnhancedConverterThread
+
+# from src.gui.preview_window import ModernPreviewWindow
 import pypandoc
+
+from gui.preview_window import ModernPreviewWindow
 
 
 class DocxToMarkdownConverter(
