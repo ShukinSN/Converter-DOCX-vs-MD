@@ -32,6 +32,7 @@ from gui.preview_window import ModernPreviewWindow
 class DocxToMarkdownConverter(
     QMainWindow
 ):  # Главное окно приложения с современным интерфейсом.
+
     def __init__(self):
         super().__init__()
         self.thread = None

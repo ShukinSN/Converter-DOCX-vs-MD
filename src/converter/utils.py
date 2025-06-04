@@ -103,6 +103,8 @@ def fix_links_and_toc(
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
 
+    content = re.sub(r"на рисунке Рисунок (\d+)", r"на рисунке \1", content)
+    content = re.sub(r"в таблице Таблица (\d+)", r"в таблице \1", content)
     content = re.sub(
         r"\[([^\]]+)\]\(([^)]+)\)",
         lambda m: f'[{m.group(1)}]({m.group(2).replace(" ", "%20")})',
