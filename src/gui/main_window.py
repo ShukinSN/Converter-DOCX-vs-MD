@@ -73,13 +73,11 @@ class DocxToMarkdownConverter(
         settings_group = QGroupBox("Настройки конвертации")
         self.toc_cb = QCheckBox("Генерировать оглавление")
         self.overwrite_cb = QCheckBox("Перезаписывать существующие файлы")
-        self.smart_quotes_cb = QCheckBox("Умные кавычки")
         self.preserve_tabs_cb = QCheckBox("Сохранять табуляцию")
 
         settings_layout = QVBoxLayout()
         settings_layout.addWidget(self.toc_cb)
         settings_layout.addWidget(self.overwrite_cb)
-        settings_layout.addWidget(self.smart_quotes_cb)
         settings_layout.addWidget(self.preserve_tabs_cb)
         settings_group.setLayout(settings_layout)
 
@@ -223,7 +221,6 @@ class DocxToMarkdownConverter(
         options = {
             "toc": self.toc_cb.isChecked(),
             "overwrite": self.overwrite_cb.isChecked(),
-            "smart": self.smart_quotes_cb.isChecked(),
             "preserve_tabs": self.preserve_tabs_cb.isChecked(),
         }
 
@@ -301,9 +298,6 @@ class DocxToMarkdownConverter(
         self.output_path_edit.setText(self.settings.value("output_path", ""))
         self.toc_cb.setChecked(self.settings.value("toc", False, type=bool))
         self.overwrite_cb.setChecked(self.settings.value("overwrite", False, type=bool))
-        self.smart_quotes_cb.setChecked(
-            self.settings.value("smart_quotes", True, type=bool)
-        )
         self.preserve_tabs_cb.setChecked(
             self.settings.value("preserve_tabs", False, type=bool)
         )
@@ -313,7 +307,6 @@ class DocxToMarkdownConverter(
         self.settings.setValue("output_path", self.output_path_edit.text())
         self.settings.setValue("toc", self.toc_cb.isChecked())
         self.settings.setValue("overwrite", self.overwrite_cb.isChecked())
-        self.settings.setValue("smart_quotes", self.smart_quotes_cb.isChecked())
         self.settings.setValue("preserve_tabs", self.preserve_tabs_cb.isChecked())
 
     def closeEvent(self, event):  # Обработка закрытия окна.
