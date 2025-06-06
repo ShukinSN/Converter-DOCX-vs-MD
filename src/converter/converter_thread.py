@@ -30,7 +30,6 @@ class EnhancedConverterThread(QThread):
         self.processed_images = set()
 
     def run(self):  # Основной процесс конвертации с обработкой ошибок.
-
         total_files = len(self.files)
         success_count = 0
 
@@ -64,18 +63,22 @@ class EnhancedConverterThread(QThread):
                     raise FileExistsError(f"Файл уже существует: {output_path}")
 
                 with tempfile.TemporaryDirectory() as temp_dir:
+                    extra_args = [
+                        f"--extract-media={temp_dir}",
+                        "--wrap=none",
+                        "--to=gfm",
+                        "--standalone",
+                        "--reference-links",
+                    ]
+                    if self.options.get("preserve_tabs"):
+                        extra_args.append("--preserve-tabs")
+
                     pypandoc.convert_file(
                         input_path,
                         "markdown",
                         outputfile=output_path,
                         format="docx",
-                        extra_args=[
-                            f"--extract-media={temp_dir}",
-                            "--wrap=none",
-                            "--to=gfm",
-                            "--standalone",
-                            "--reference-links",
-                        ],
+                        extra_args=extra_args,
                     )
 
                     process_images(output_path, temp_dir)
@@ -86,7 +89,8 @@ class EnhancedConverterThread(QThread):
                             new_path = os.path.join("images", f)
                             replacement_rules[old_path] = new_path
                     replace_image_links(output_path, replacement_rules)
-                    fix_links_and_toc(output_path)
+                    if self.options.get("toc"):
+                        fix_links_and_toc(output_path)
 
                 success_count += 1
                 self.conversion_finished.emit(
