@@ -29,7 +29,7 @@ class EnhancedConverterThread(QThread):
         self._is_running = True
         self.processed_images = set()
 
-    def run(self):  # Основной процесс конвертации с обработкой ошибок.
+    def run(self):
         total_files = len(self.files)
         success_count = 0
 
@@ -83,14 +83,29 @@ class EnhancedConverterThread(QThread):
 
                     process_images(output_path, temp_dir)
                     replacement_rules = {}
-                    for f in os.listdir(os.path.join(temp_dir, "media")):
-                        if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
-                            old_path = os.path.join("media", f)
-                            new_path = os.path.join("images", f)
-                            replacement_rules[old_path] = new_path
-                    replace_image_links(output_path, replacement_rules)
+                    media_dir = os.path.join(temp_dir, "media")
+                    if os.path.exists(media_dir):
+                        for f in os.listdir(media_dir):
+                            if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
+                                old_path = os.path.join("media", f)
+                                new_path = os.path.join("images", f)
+                                replacement_rules[old_path] = new_path
+                    if replacement_rules:
+                        replace_image_links(output_path, replacement_rules)
+                    else:
+                        self.conversion_finished.emit(
+                            filename,
+                            f"Успешно: {safe_name}.md (нет изображений)",
+                            output_path,
+                        )
+
                     if self.options.get("toc"):
-                        fix_links_and_toc(output_path)
+                        try:
+                            fix_links_and_toc(output_path)
+                        except Exception as e:
+                            self.error_occurred.emit(
+                                f"Ошибка обработки оглавления ({filename}): {str(e)}"
+                            )
 
                 success_count += 1
                 self.conversion_finished.emit(
@@ -104,5 +119,5 @@ class EnhancedConverterThread(QThread):
 
         self.finished_all.emit(success_count)
 
-    def stop(self):  # Безопасная остановка потока.
+    def stop(self):
         self._is_running = False
