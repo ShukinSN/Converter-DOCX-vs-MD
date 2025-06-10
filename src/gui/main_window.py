@@ -19,20 +19,12 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QSettings, QTimer
 from PyQt5.QtGui import QIcon, QFont, QTextCursor
-
-# from src.converter.converter_thread import EnhancedConverterThread
 from converter.converter_thread import EnhancedConverterThread
-
-# from src.gui.preview_window import ModernPreviewWindow
+from gui.preview_window import ModernPreviewWindow
 import pypandoc
 
-from gui.preview_window import ModernPreviewWindow
 
-
-class DocxToMarkdownConverter(
-    QMainWindow
-):  # Главное окно приложения с современным интерфейсом.
-
+class DocxToMarkdownConverter(QMainWindow):
     def __init__(self):
         super().__init__()
         self.thread = None
@@ -42,7 +34,7 @@ class DocxToMarkdownConverter(
         self.load_settings()
         QTimer.singleShot(100, self.check_pandoc_installation)
 
-    def init_ui(self):  # Инициализация пользовательского интерфейса.
+    def init_ui(self):
         self.setWindowTitle("DOCX to Markdown Converter Pro")
         self.setGeometry(100, 100, 900, 700)
 
@@ -122,8 +114,7 @@ class DocxToMarkdownConverter(
         self.cancel_btn.clicked.connect(self.cancel_conversion)
         self.file_list.itemDoubleClicked.connect(self.preview_file)
 
-    def check_pandoc_installation(self):  # Проверка наличия Pandoc.
-
+    def check_pandoc_installation(self):
         try:
             pypandoc.get_pandoc_version()
         except OSError:
@@ -134,8 +125,7 @@ class DocxToMarkdownConverter(
                 "Установите его с официального сайта: https://pandoc.org/installing.html",
             )
 
-    def add_files(self):  # Добавление файлов через диалог.
-
+    def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
             self, "Выберите DOCX файлы", "", "Документы Word (*.docx);;Все файлы (*)"
         )
@@ -150,8 +140,7 @@ class DocxToMarkdownConverter(
                     item.setToolTip(f)
                     self.file_list.addItem(item)
 
-    def add_folder(self):  # Добавление всех DOCX из папки.
-
+    def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Выберите папку с документами")
         if folder:
             existing = {
@@ -166,26 +155,21 @@ class DocxToMarkdownConverter(
                             item.setToolTip(path)
                             self.file_list.addItem(item)
 
-    def remove_selected(self):  # Удаление выбранных файлов из списка.
-
+    def remove_selected(self):
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
 
-    def clear_list(self):  # Очистка всего списка файлов.
-
+    def clear_list(self):
         self.file_list.clear()
 
-    def select_output(self):  # Выбор папки для сохранения.
-
+    def select_output(self):
         path = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения")
         if path:
             self.output_path_edit.setText(path)
 
-    def preview_file(self, item):  # редпросмотр выбранного файла.
-
-        if self.preview_window is None:
+    def preview_file(self, item):
+        if self.preview_window is None or not self.preview_window.isVisible():
             self.preview_window = ModernPreviewWindow(self)
-
         try:
             content = pypandoc.convert_file(
                 item.text(), "markdown", format="docx", extra_args=["--wrap=none"]
@@ -197,8 +181,7 @@ class DocxToMarkdownConverter(
                 self, "Ошибка предпросмотра", f"Не удалось открыть файл:\n{str(e)}"
             )
 
-    def start_conversion(self):  # Запуск процесса конвертации.
-
+    def start_conversion(self):
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "Нет файлов", "Добавьте файлы для конвертации")
             return
@@ -242,13 +225,11 @@ class DocxToMarkdownConverter(
 
         self.thread.start()
 
-    def update_progress(self, value, filename):  # Oбновление прогресс-бара.
-
+    def update_progress(self, value, filename):
         self.progress.setValue(value)
         self.progress.setFormat(f"{filename} — {value}%")
 
-    def log_result(self, filename, message, output_path):  # Логирование результата.
-
+    def log_result(self, filename, message, output_path):
         if output_path:
             self.log.append(f"<font color='green'>{message}</font>")
             self.log.append(f"<font color='gray'>Сохранено в: {output_path}</font><br>")
@@ -257,13 +238,11 @@ class DocxToMarkdownConverter(
 
         self.log.moveCursor(QTextCursor.End)
 
-    def log_error(self, message):  # Логирование ошибки.
-
+    def log_error(self, message):
         self.log.append(f"<font color='red'>{message}</font><br>")
         self.log.moveCursor(QTextCursor.End)
 
-    def finalize_conversion(self, success_count):  # Завершение процесса конвертации.
-
+    def finalize_conversion(self, success_count):
         total = self.file_list.count()
         self.progress.setFormat(f"Готово! Успешно: {success_count}/{total}")
         self.progress.setValue(100)
@@ -278,8 +257,7 @@ class DocxToMarkdownConverter(
                 f"Успешно обработано {success_count} из {total} файлов",
             )
 
-    def cancel_conversion(self):  # Отмена конвертации.
-
+    def cancel_conversion(self):
         if self.thread and self.thread.isRunning():
             self.thread.stop()
             self.thread.wait()
@@ -293,8 +271,7 @@ class DocxToMarkdownConverter(
             self.convert_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
 
-    def load_settings(self):  # Загрузка сохраненных настроек.
-
+    def load_settings(self):
         self.output_path_edit.setText(self.settings.value("output_path", ""))
         self.toc_cb.setChecked(self.settings.value("toc", False, type=bool))
         self.overwrite_cb.setChecked(self.settings.value("overwrite", False, type=bool))
@@ -302,17 +279,17 @@ class DocxToMarkdownConverter(
             self.settings.value("preserve_tabs", False, type=bool)
         )
 
-    def save_settings(self):  # Сохранение текущих настроек.
-
+    def save_settings(self):
         self.settings.setValue("output_path", self.output_path_edit.text())
         self.settings.setValue("toc", self.toc_cb.isChecked())
         self.settings.setValue("overwrite", self.overwrite_cb.isChecked())
         self.settings.setValue("preserve_tabs", self.preserve_tabs_cb.isChecked())
 
-    def closeEvent(self, event):  # Обработка закрытия окна.
-
+    def closeEvent(self, event):
         self.save_settings()
         if self.thread and self.thread.isRunning():
             self.thread.stop()
             self.thread.wait()
+        if self.preview_window and self.preview_window.isVisible():
+            self.preview_window.close()
         event.accept()

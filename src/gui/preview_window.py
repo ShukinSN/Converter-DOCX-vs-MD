@@ -1,96 +1,55 @@
 from PyQt5.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
+    QMainWindow,
     QTextEdit,
+    QVBoxLayout,
+    QWidget,
+    QPushButton,
     QTabWidget,
-    QMessageBox,
-    QFileDialog,
 )
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import markdown
 
 
-class ModernPreviewWindow(
-    QWidget
-):  # Современное окно предпросмотра с подсветкой синтаксиса.
-
+class ModernPreviewWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Предпросмотр Markdown")
-        self.setGeometry(300, 300, 900, 700)
+        self.setGeometry(200, 200, 800, 600)
+        self.init_ui()
 
-        layout = QVBoxLayout()
-        self.tabs = QTabWidget()
+    def init_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
 
-        self.raw_edit = QTextEdit()
-        self.raw_edit.setFont(QFont("Consolas", 10))
+        self.tab_widget = QTabWidget()
+        self.markdown_view = QTextEdit()
+        self.markdown_view.setReadOnly(True)
+        self.markdown_view.setFont(QFont("Consolas", 10))
+        self.html_view = QTextEdit()
+        self.html_view.setReadOnly(True)
+        self.html_view.setFont(QFont("Consolas", 10))
 
-        self.rendered_view = QTextEdit()
-        self.rendered_view.setReadOnly(True)
-        self.rendered_view.setFont(QFont("Segoe UI", 10))
+        self.tab_widget.addTab(self.markdown_view, "Markdown")
+        self.tab_widget.addTab(self.html_view, "HTML")
 
-        self.tabs.addTab(self.raw_edit, "Markdown")
-        self.tabs.addTab(self.rendered_view, "HTML Preview")
+        self.close_button = QPushButton("Закрыть")
+        self.close_button.clicked.connect(self.close)
 
-        btn_layout = QHBoxLayout()
-        self.copy_md_btn = QPushButton("Копировать Markdown")
-        self.copy_html_btn = QPushButton("Копировать HTML")
-        self.save_btn = QPushButton("Сохранить как...")
-        self.close_btn = QPushButton("Закрыть")
+        layout.addWidget(self.tab_widget)
+        layout.addWidget(self.close_button)
 
-        btn_layout.addWidget(self.copy_md_btn)
-        btn_layout.addWidget(self.copy_html_btn)
-        btn_layout.addWidget(self.save_btn)
-        btn_layout.addWidget(self.close_btn)
+    def set_content(self, content):
+        self.markdown_view.setPlainText(content)
+        try:
+            html = markdown.markdown(content, extensions=["fenced_code", "codehilite"])
+            self.html_view.setHtml(html)
+        except Exception as e:
+            self.html_view.setPlainText(f"Ошибка конвертации в HTML: {str(e)}")
 
-        layout.addWidget(self.tabs)
-        layout.addLayout(btn_layout)
-        self.setLayout(layout)
-
-        self.copy_md_btn.clicked.connect(self.copy_markdown)
-        self.copy_html_btn.clicked.connect(self.copy_html)
-        self.save_btn.clicked.connect(self.save_content)
-        self.close_btn.clicked.connect(self.close)
-
-    def set_content(self, text):  # Установка содержимого для предпросмотра.
-
-        self.raw_edit.setPlainText(text)
-        html = markdown.markdown(text, extensions=["fenced_code", "codehilite"])
-        self.rendered_view.setHtml(f"{html}")
-
-    def copy_markdown(self):  # Копирование Markdown в буфер обмена.
-
-        clipboard = self.parent().QApplication.clipboard()
-        clipboard.setText(self.raw_edit.toPlainText())
-        QMessageBox.information(
-            self, "Скопировано", "Markdown скопирован в буфер обмена"
-        )
-
-    def copy_html(self):  # Копирование HTML в буфер обмена.
-
-        clipboard = self.parent().QApplication.clipboard()
-        clipboard.setText(self.rendered_view.toHtml())
-        QMessageBox.information(self, "Скопировано", "HTML скопирован в буфер обмена")
-
-    def save_content(self):  #  Сохранение содержимого в файл.
-
-        formats = {
-            "Markdown (*.md)": lambda: self.raw_edit.toPlainText(),
-            "HTML (*.html)": lambda: self.rendered_view.toHtml(),
-        }
-
-        path, selected_filter = QFileDialog.getSaveFileName(
-            self, "Сохранить как", "", ";;".join(formats.keys())
-        )
-
-        if path:
-            for fmt, get_content in formats.items():
-                if fmt == selected_filter:
-                    with open(path, "w", encoding="utf-8") as f:
-                        f.write(get_content())
-                    QMessageBox.information(
-                        self, "Сохранено", f"Файл успешно сохранен как {path}"
-                    )
-                    break
+    def closeEvent(self, event):
+        # Очищаем ссылку в родительском окне при закрытии
+        if self.parent():
+            self.parent().preview_window = None
+        event.accept()
