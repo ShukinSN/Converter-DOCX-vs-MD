@@ -49,7 +49,7 @@ class ModernPreviewWindow(QMainWindow):
             self.html_view.setPlainText(f"Ошибка конвертации в HTML: {str(e)}")
 
     def closeEvent(self, event):
-        # Очищаем ссылку в родительском окне при закрытии
+        # Очищаем ссылку в окне при закрытии
         if self.parent():
             self.parent().preview_window = None
         event.accept()
