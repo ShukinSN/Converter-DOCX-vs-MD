@@ -1,4 +1,6 @@
 import os
+import sys
+import subprocess
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -76,10 +78,14 @@ class DocxToMarkdownConverter(QMainWindow):
         output_group = QGroupBox("Папка для сохранения")
         self.output_path_edit = QLineEdit()
         self.browse_btn = QPushButton("Обзор...")
+        self.open_folder_btn = QPushButton("Открыть папку")
+        self.open_folder_btn.setEnabled(False)
 
         output_layout = QHBoxLayout()
         output_layout.addWidget(self.output_path_edit)
         output_layout.addWidget(self.browse_btn)
+        output_layout.addWidget(self.browse_btn)
+        output_layout.addWidget(self.open_folder_btn)
         output_group.setLayout(output_layout)
 
         self.convert_btn = QPushButton("Начать конвертацию")
@@ -113,6 +119,8 @@ class DocxToMarkdownConverter(QMainWindow):
         self.convert_btn.clicked.connect(self.start_conversion)
         self.cancel_btn.clicked.connect(self.cancel_conversion)
         self.file_list.itemDoubleClicked.connect(self.preview_file)
+        self.open_folder_btn.clicked.connect(self.open_output_folder)
+        self.output_path_edit.textChanged.connect(self.update_open_folder_btn_state)
 
     def check_pandoc_installation(self):
         try:
@@ -293,3 +301,27 @@ class DocxToMarkdownConverter(QMainWindow):
         if self.preview_window and self.preview_window.isVisible():
             self.preview_window.close()
         event.accept()
+
+    def update_open_folder_btn_state(self):
+        """Активирует кнопку открытия папки только если путь существует"""
+        path = self.output_path_edit.text()
+        self.open_folder_btn.setEnabled(bool(path.strip() and os.path.isdir(path)))
+
+    def open_output_folder(self):
+        """Открывает папку для сохранения в проводнике ОС"""
+        path = self.output_path_edit.text()
+        if os.path.isdir(path):
+            try:
+                if os.name == "nt":  # Для Windows
+                    os.startfile(path)
+                elif os.name == "posix":  # Для Linux/Mac
+                    if sys.platform == "darwin":
+                        subprocess.Popen(["open", path])
+                    else:
+                        subprocess.Popen(["xdg-open", path])
+            except Exception as e:
+                QMessageBox.warning(
+                    self, "Ошибка", f"Не удалось открыть папку:\n{str(e)}"
+                )
+        else:
+            QMessageBox.warning(self, "Ошибка", "Указанная папка не существует")
