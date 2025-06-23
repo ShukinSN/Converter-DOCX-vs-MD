@@ -1,5 +1,6 @@
 from PyQt5.QtWidgets import QMessageBox
 import pypandoc
+from wand.api import library
 
 
 class DependencyChecker:
@@ -14,6 +15,12 @@ class DependencyChecker:
                 )
         except (ImportError, OSError):
             missing.append("Pandoc (установите с https://pandoc.org/installing.html)")
+
+        try:
+            if not library.MagickGetVersion:
+                missing.append("ImageMagick (установите с https://imagemagick.org/)")
+        except AttributeError:
+            missing.append("ImageMagick (установите с https://imagemagick.org/)")
 
         for lib in ["markdown", "bs4", "PyQt5", "wand"]:
             try:
