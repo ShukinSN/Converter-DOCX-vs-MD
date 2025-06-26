@@ -44,12 +44,28 @@ class ModernPreviewWindow(QMainWindow):
         self.markdown_view.setPlainText(content)
         try:
             html = markdown.markdown(content, extensions=["fenced_code", "codehilite"])
+            # Добавление CSS для поддержки нумерации рисунков
+            css = """<style>
+/* initialise the counter */
+body { counter-reset: figureCounter; }
+/* increment the counter for every instance of a figure */
+figure { counter-increment: figureCounter; }
+/* prepend the counter to the figcaption content */
+figure figcaption:before {
+    content: "Рисунок " counter(figureCounter) " - ";
+}
+figure figcaption {
+    text-align: center;
+    margin-top: 8px;
+}
+</style>
+"""
+            html = css + "\n" + html
             self.html_view.setHtml(html)
         except Exception as e:
             self.html_view.setPlainText(f"Ошибка конвертации в HTML: {str(e)}")
 
     def closeEvent(self, event):
-        # Очищаем ссылку в окне при закрытии
         if self.parent():
             self.parent().preview_window = None
         event.accept()
