@@ -8,13 +8,13 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="wand.*")
 
 
-def sanitize_filename(name):
-    """Очистка имени файла от недопустимых символов."""
+def sanitize_filename(name):  # Очистка имени файла от недопустимых символов.
+
     return re.sub(r'[\\/*?:"<>|]', "_", name)
 
 
-def convert_emf_to_png(emf_path):
-    """Конвертация EMF в PNG с обработкой ошибок."""
+def convert_emf_to_png(emf_path):  # Конвертация EMF в PNG с обработкой ошибок.
+
     try:
         png_path = os.path.splitext(emf_path)[0] + ".png"
         with Image(filename=emf_path) as img:
@@ -26,8 +26,10 @@ def convert_emf_to_png(emf_path):
         return None
 
 
-def process_images(md_path, temp_dir):
-    """Основная функция обработки изображений и подписей."""
+def process_images(
+    md_path, temp_dir
+):  # Основная функция обработки изображений и подписей.
+
     md_dir = os.path.dirname(md_path)
     images_folder = os.path.join(md_dir, "images")
     os.makedirs(images_folder, exist_ok=True)
@@ -42,7 +44,7 @@ def process_images(md_path, temp_dir):
     i = 0
     in_table = False
 
-    # Упрощенные стили только для центрирования изображений
+    # Cтили
     css = """<!-- DOCX2MD STYLES -->
 <style>
 .figure-container {
@@ -214,8 +216,10 @@ body {
         f.write(content)
 
 
-def fix_links_and_toc(md_path):
-    """Функция для обработки ссылок и создания оглавления."""
+def fix_links_and_toc(
+    md_path,
+):  # Функция для обработки ссылок и создания оглавления.
+
     try:
         with open(md_path, "r", encoding="utf-8") as f:
             content = f.read()
