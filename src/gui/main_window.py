@@ -37,7 +37,7 @@ class DocxToMarkdownConverter(QMainWindow):
         QTimer.singleShot(100, self.check_pandoc_installation)
 
     def init_ui(self):
-        self.setWindowTitle("DOCX to Markdown Converter Pro")
+        self.setWindowTitle("DOCX to Markdown Converter")
         self.setGeometry(100, 100, 900, 700)
 
         central = QWidget()
