@@ -83,9 +83,12 @@ class DocxToMarkdownConverter(QMainWindow):
 
         output_layout = QHBoxLayout()
         output_layout.addWidget(self.output_path_edit)
-        output_layout.addWidget(self.browse_btn)
-        output_layout.addWidget(self.browse_btn)
-        output_layout.addWidget(self.open_folder_btn)
+        output_layout.addWidget(
+            self.browse_btn
+        )  # Только один раз добавляем кнопку "Обзор"
+        output_layout.addWidget(
+            self.open_folder_btn
+        )  # Добавляем кнопку "Открыть папку"
         output_group.setLayout(output_layout)
 
         self.convert_btn = QPushButton("Начать конвертацию")
