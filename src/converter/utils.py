@@ -43,7 +43,8 @@ def process_images(md_path, temp_dir):
     in_table = False
 
     # Упрощенные стили только для центрирования изображений
-    css = """<style>
+    css = """<!-- DOCX2MD STYLES -->
+<style>
 .figure-container {
     text-align: center;
     margin: 15px 0;
@@ -195,8 +196,19 @@ body {
             i += 1
 
     content = "\n".join(new_lines)
-    if "<style>" not in content:
-        content = css + "\n\n" + content
+
+    # Обработка добавления стилей в конец файла
+    style_marker = "<!-- DOCX2MD STYLES -->"
+
+    # Если стили уже есть в файле, ничего не делаем
+    if style_marker in content:
+        pass
+    # Если стилей нет, добавляем их в конец файла
+    else:
+        # Удаляем маркер из CSS (если он там был)
+        clean_css = css.replace(style_marker, "").strip()
+        # Добавляем 2 переноса строки перед стилями, если их нет
+        content = content.rstrip() + f"\n\n{style_marker}\n{clean_css}"
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)
