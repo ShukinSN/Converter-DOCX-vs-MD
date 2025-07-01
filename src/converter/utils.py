@@ -63,8 +63,7 @@ def process_images(
     margin-top: 5px;
 }
 .figure-caption:before {
-    content: "Рисунок " counter(figureCounter) " - ";
-    font-weight: bold;
+    content: "Рисунок " counter(figureCounter) " – ";
 }
 body {
     counter-reset: figureCounter;
