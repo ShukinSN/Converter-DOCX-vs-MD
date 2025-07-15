@@ -26,10 +26,7 @@ def convert_emf_to_png(emf_path):  # Конвертация EMF в PNG с обр
         return None
 
 
-def process_images(
-    md_path, temp_dir
-):  # Основная функция обработки изображений и подписей.
-
+def process_images(md_path, temp_dir):
     md_dir = os.path.dirname(md_path)
     images_folder = os.path.join(md_dir, "images")
     os.makedirs(images_folder, exist_ok=True)
@@ -43,8 +40,9 @@ def process_images(
     new_lines = []
     i = 0
     in_table = False
+    has_images = False  # Флаг для отслеживания наличия изображений
 
-    # Cтили
+    # Стили
     css = """<!-- DOCX2MD STYLES -->
 <style>
 .figure-container {
@@ -85,11 +83,12 @@ body {
 
         # Обработка изображений (как в таблицах, так и вне их)
         def process_image_match(match, is_markdown=True):
-            nonlocal line
+            nonlocal line, has_images
             src = match.group(2 if is_markdown else 1)
             if src.startswith("data:") or not src.strip():
                 return None
 
+            has_images = True  # Устанавливаем флаг, если найдено изображение
             original_name = os.path.basename(src.split("?")[0])
             name, ext = os.path.splitext(original_name)
             img_name = f"{name}_{timestamp}{ext.lower()}"
@@ -178,7 +177,7 @@ body {
                             updated_img = updated_img.replace(src, rel_path)
                             line = f'<div class="figure-container">\n{updated_img}\n<span class="figure-caption">{caption}</span>\n</div>'
 
-        # Обработка изображений внутри таблиц (без изменений)
+        # Обработка изображений внутри таблиц
         md_images = list(re.finditer(r"!\[([^\]]*)\]\(([^)]+)\)", line))
         for match in md_images:
             process_image_match(match, is_markdown=True)
@@ -198,18 +197,15 @@ body {
 
     content = "\n".join(new_lines)
 
-    # Обработка добавления стилей в конец файла
+    # Обработка добавления стилей только если есть изображения
     style_marker = "<!-- DOCX2MD STYLES -->"
-
-    # Если стили уже есть в файле, ничего не делаем
-    if style_marker in content:
-        pass
-    # Если стилей нет, добавляем их в конец файла
-    else:
-        # Удаляем маркер из CSS (если он там был)
-        clean_css = css.replace(style_marker, "").strip()
-        # Добавляем 2 переноса строки перед стилями, если их нет
-        content = content.rstrip() + f"\n\n{style_marker}\n{clean_css}"
+    if has_images:
+        # Если стили уже есть, ничего не делаем
+        if style_marker not in content:
+            # Удаляем маркер из CSS (если он там был)
+            clean_css = css.replace(style_marker, "").strip()
+            # Добавляем стили в конец файла
+            content = content.rstrip() + f"\n\n{style_marker}\n{clean_css}"
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)
