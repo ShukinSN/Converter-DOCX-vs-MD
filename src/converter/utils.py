@@ -9,12 +9,10 @@ warnings.filterwarnings("ignore", category=UserWarning, module="wand.*")
 
 
 def sanitize_filename(name):  # Очистка имени файла от недопустимых символов.
-
     return re.sub(r'[\\/*?:"<>|]', "_", name)
 
 
 def convert_emf_to_png(emf_path):  # Конвертация EMF в PNG с обработкой ошибок.
-
     try:
         png_path = os.path.splitext(emf_path)[0] + ".png"
         with Image(filename=emf_path) as img:
@@ -64,7 +62,7 @@ def process_images(md_path, temp_dir):
     content: "Рисунок " counter(figureCounter) " – ";
 }
 body {
-    counter-reset: figureCounter;
+    counter-reset: figureCounter apptableCounter;
 }
 .figure-container {
     counter-increment: figureCounter;
@@ -159,7 +157,7 @@ body {
                                 break
                             next_line = lines[i + j].strip()
                             caption_match = re.match(
-                                r"^(?:Рисунок|Рис\.?)\s*(?:\d+)?\s*[–—-]\s*(.*)$",
+                                r"^(?:Рисунок|Рис\.?)\s*(?:\d+)?\s*[-–—]\s*(.*)$",
                                 next_line,
                                 re.IGNORECASE,
                             )
@@ -188,7 +186,7 @@ body {
 
         # Пропускаем строки с подписями без изображений
         if not in_table and re.match(
-            r"^(?:Рисунок|Рис\.?)\s*[–—-]", stripped_line, re.IGNORECASE
+            r"^(?:Рисунок|Рис\.?)\s*[-–—]", stripped_line, re.IGNORECASE
         ):
             i += 1
         else:
@@ -211,10 +209,113 @@ body {
         f.write(content)
 
 
-def fix_links_and_toc(
-    md_path,
-):  # Функция для обработки ссылок и создания оглавления.
+def process_tables(md_path):
+    md_dir = os.path.dirname(md_path)
+    with open(md_path, "r", encoding="utf-8") as f:
+        content = f.read()
 
+    lines = content.split("\n")
+    new_lines = []
+    i = 0
+    in_table = False
+    has_tables = False
+
+    # Стили для таблиц
+    css = """<!-- DOCX2MD STYLES -->
+<style>
+.app_table-caption {
+    display: block;
+    text-align: left;
+    margin-top: 5px;
+}
+.app_table-caption:before {
+    content: "Таблица " counter(apptableCounter) " – ";
+    letter-spacing: 2pt;
+}
+body {
+    counter-reset: figureCounter apptableCounter;
+}
+.app_table-caption {
+    counter-increment: apptableCounter;
+}
+</style>"""
+
+    while i < len(lines):
+        line = lines[i]
+        stripped_line = line.strip()
+
+        # Определяем, находимся ли мы внутри таблицы
+        if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
+            in_table = True
+        elif in_table and not stripped_line.startswith("|"):
+            in_table = False
+
+        # Обработка подписей таблиц вне таблиц
+        if not in_table:
+            caption_match = re.match(
+                r"^(?:Таблица|Табл\.?)\s*(?:\d+)?\s*[-–—]\s*(.*)$",
+                stripped_line,
+                re.IGNORECASE,
+            )
+            if caption_match:
+                caption = caption_match.group(1).strip()
+                print(f"Найдена подпись таблицы: {stripped_line} -> {caption}")
+                new_lines.append(f'<div class="app_table-caption">{caption}</div>')
+                has_tables = True
+                i += 1
+                continue
+
+        new_lines.append(line)
+        i += 1
+
+    content = "\n".join(new_lines)
+
+    # Обработка добавления стилей только если есть таблицы
+    style_marker = "<!-- DOCX2MD STYLES -->"
+    if has_tables:
+        if style_marker not in content:
+            clean_css = css.replace(style_marker, "").strip()
+            content = content.rstrip() + f"\n\n{style_marker}\n{clean_css}"
+        else:
+            # Проверяем, есть ли правило body с counter-reset
+            body_match = re.search(
+                r"(<!-- DOCX2MD STYLES -->\n<style>.*?body\s*\{[^}]*counter-reset:[^}]*\}.*?</style>)",
+                content,
+                flags=re.DOTALL,
+            )
+            if body_match:
+                # Проверяем, есть ли уже apptableCounter в counter-reset
+                if "apptableCounter" not in body_match.group(0):
+                    # Если apptableCounter отсутствует, добавляем его
+                    content = re.sub(
+                        r"(body\s*\{[^}]*counter-reset:\s*[^;}]*)(\s*[;}]?)",
+                        r"\1 apptableCounter\2",
+                        content,
+                        flags=re.DOTALL,
+                    )
+                # Добавляем стили .app_table-caption, если их ещё нет
+                if ".app_table-caption" not in content:
+                    content = re.sub(
+                        r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
+                        r'\1\2\n.app_table-caption {\n    display: block;\n    text-align: left;\n    margin-top: 5px;\n}\n.app_table-caption:before {\n    content: "Таблица " counter(apptableCounter) " – ";\n    letter-spacing: 2pt;\n}\n.app_table-caption {\n    counter-increment: apptableCounter;\n}\n\3',
+                        content,
+                        flags=re.DOTALL,
+                    )
+            else:
+                # Если правила body нет, добавляем его вместе со стилями .app_table-caption
+                content = re.sub(
+                    r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
+                    r'\1\2\nbody {\n    counter-reset: figureCounter apptableCounter;\n}\n.app_table-caption {\n    display: block;\n    text-align: left;\n    margin-top: 5px;\n}\n.app_table-caption:before {\n    content: "Таблица " counter(apptableCounter) " – ";\n    letter-spacing: 2pt;\n}\n.app_table-caption {\n    counter-increment: apptableCounter;\n}\n\3',
+                    content,
+                    flags=re.DOTALL,
+                )
+
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+def fix_links_and_toc(md_path):
+    """Обработка ссылок и создание оглавления."""
     try:
         with open(md_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -240,9 +341,10 @@ def fix_links_and_toc(
         content = re.sub(r"^(#+)\s+(.+)$", make_anchor, content, flags=re.MULTILINE)
 
         # Вставка оглавления
-        if "## Оглавление" in content:
+        if toc_entries and "## Оглавление" in content:
             toc = "## Оглавление\n\n" + "\n".join(
-                f"{'    '*(l-1)}- [{t}](#{a})" for l, t, a in toc_entries
+                f"{'    ' * (level - 1)}- [{title}](#{anchor})"
+                for level, title, anchor in toc_entries
             )
             content = re.sub(
                 r"(## Оглавление\n\n).*?(\n## )",

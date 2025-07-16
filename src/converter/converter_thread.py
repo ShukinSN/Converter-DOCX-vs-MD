@@ -9,6 +9,7 @@ from .utils import (
     sanitize_filename,
     convert_emf_to_png,
     process_images,
+    process_tables,
     fix_links_and_toc,
     replace_image_links,
 )
@@ -38,7 +39,9 @@ class EnhancedConverterThread(QThread):
                 break
 
             filename = os.path.basename(input_path)
-            self.progress_updated.emit(int((i + 1) / total_files * 100), filename)
+            self.progress_updated.emit(
+                int((i / total_files) * 80), f"Обработка файла: {filename}"
+            )
 
             try:
                 if not os.access(input_path, os.R_OK):
@@ -81,7 +84,23 @@ class EnhancedConverterThread(QThread):
                         extra_args=extra_args,
                     )
 
+                    self.progress_updated.emit(
+                        int((i / total_files) * 80 + 10),
+                        f"Конвертирован в Markdown: {filename}",
+                    )
+
                     process_images(output_path, temp_dir)
+                    self.progress_updated.emit(
+                        int((i / total_files) * 80 + 15),
+                        f"Обработаны изображения: {filename}",
+                    )
+
+                    process_tables(output_path)
+                    self.progress_updated.emit(
+                        int((i / total_files) * 80 + 20),
+                        f"Обработаны подписи таблиц: {filename}",
+                    )
+
                     replacement_rules = {}
                     media_dir = os.path.join(temp_dir, "media")
                     if os.path.exists(media_dir):
@@ -92,16 +111,18 @@ class EnhancedConverterThread(QThread):
                                 replacement_rules[old_path] = new_path
                     if replacement_rules:
                         replace_image_links(output_path, replacement_rules)
-                    else:
-                        self.conversion_finished.emit(
-                            filename,
-                            f"Успешно: {safe_name}.md (нет изображений)",
-                            output_path,
+                        self.progress_updated.emit(
+                            int((i / total_files) * 80 + 25),
+                            f"Заменены ссылки на изображения: {filename}",
                         )
 
                     if self.options.get("toc"):
                         try:
                             fix_links_and_toc(output_path)
+                            self.progress_updated.emit(
+                                int((i / total_files) * 80 + 30),
+                                f"Обработаны ссылки и оглавление: {filename}",
+                            )
                         except Exception as e:
                             self.error_occurred.emit(
                                 f"Ошибка обработки оглавления ({filename}): {str(e)}"
