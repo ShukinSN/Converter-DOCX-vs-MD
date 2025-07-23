@@ -17,9 +17,12 @@ class DependencyChecker:
             missing.append("Pandoc (установите с https://pandoc.org/installing.html)")
 
         try:
-            if not library.MagickGetVersion:
+            from wand import version
+
+            imagemagick_version = version.MAGICK_VERSION
+            if not imagemagick_version:
                 missing.append("ImageMagick (установите с https://imagemagick.org/)")
-        except AttributeError:
+        except (ImportError, AttributeError):
             missing.append("ImageMagick (установите с https://imagemagick.org/)")
 
         for lib in ["markdown", "bs4", "PyQt5", "wand"]:
