@@ -252,6 +252,7 @@ class DocxToMarkdownConverter(QMainWindow):
     def log_error(self, message):
         self.log.append(f"<font color='red'>{message}</font><br>")
         self.log.moveCursor(QTextCursor.End)
+        QMessageBox.critical(self, "Ошибка", message)
 
     def finalize_conversion(self, success_count):
         total = self.file_list.count()
