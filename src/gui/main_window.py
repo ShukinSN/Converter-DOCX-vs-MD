@@ -32,6 +32,12 @@ class DocxToMarkdownConverter(QMainWindow):
         self.thread = None
         self.preview_window = None
         self.settings = QSettings("DOCX2MD", "EnhancedConverter")
+        # Определяем корневую директорию проекта
+        self.project_root = os.path.dirname(os.path.abspath(__file__))
+        while not os.path.exists(os.path.join(self.project_root, "src")):
+            self.project_root = os.path.dirname(self.project_root)
+            if self.project_root == os.path.dirname(self.project_root):
+                raise Exception("Не удалось найти корень проекта с директорией src/")
         self.init_ui()
         self.load_settings()
         QTimer.singleShot(100, self.check_pandoc_installation)
@@ -83,12 +89,8 @@ class DocxToMarkdownConverter(QMainWindow):
 
         output_layout = QHBoxLayout()
         output_layout.addWidget(self.output_path_edit)
-        output_layout.addWidget(
-            self.browse_btn
-        )  # Только один раз добавляем кнопку "Обзор"
-        output_layout.addWidget(
-            self.open_folder_btn
-        )  # Добавляем кнопку "Открыть папку"
+        output_layout.addWidget(self.browse_btn)
+        output_layout.addWidget(self.open_folder_btn)
         output_group.setLayout(output_layout)
 
         self.convert_btn = QPushButton("Начать конвертацию")
@@ -222,6 +224,7 @@ class DocxToMarkdownConverter(QMainWindow):
             [self.file_list.item(i).text() for i in range(self.file_list.count())],
             self.output_path_edit.text(),
             options,
+            self.project_root,  # Передаём корень проекта
         )
 
         self.thread.progress_updated.connect(self.update_progress)

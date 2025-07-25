@@ -24,7 +24,7 @@ def convert_emf_to_png(emf_path):  # Конвертация EMF в PNG с обр
         return None
 
 
-def process_images(md_path, temp_dir):
+def process_images(md_path, temp_dir, project_root):
     md_dir = os.path.dirname(md_path)
     images_folder = os.path.join(md_dir, "images")
     os.makedirs(images_folder, exist_ok=True)
@@ -38,55 +38,24 @@ def process_images(md_path, temp_dir):
     new_lines = []
     i = 0
     in_table = False
-    has_images = False  # Флаг для отслеживания наличия изображений
-
-    # Стили
-    css = """<!-- DOCX2MD STYLES -->
-<style>
-.figure-container {
-    text-align: center;
-    margin: 15px 0;
-}
-.figure-container img {
-    display: inline-block;
-    max-width: 100%;
-    height: auto;
-}
-.figure-caption {
-    display: block;
-    text-align: center;
-    font-style: italic;
-    margin-top: 5px;
-}
-.figure-caption:before {
-    content: "Рисунок " counter(figureCounter) " – ";
-}
-body {
-    counter-reset: figureCounter apptableCounter;
-}
-.figure-container {
-    counter-increment: figureCounter;
-}
-</style>"""
+    has_images = False
 
     while i < len(lines):
         line = lines[i]
         stripped_line = line.strip()
 
-        # Определяем, находимся ли мы внутри таблицы
         if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
             in_table = True
         elif in_table and not stripped_line.startswith("|"):
             in_table = False
 
-        # Обработка изображений (как в таблицах, так и вне их)
         def process_image_match(match, is_markdown=True):
             nonlocal line, has_images
             src = match.group(2 if is_markdown else 1)
             if src.startswith("data:") or not src.strip():
                 return None
 
-            has_images = True  # Устанавливаем флаг, если найдено изображение
+            has_images = True
             original_name = os.path.basename(src.split("?")[0])
             name, ext = os.path.splitext(original_name)
             img_name = f"{name}_{timestamp}{ext.lower()}"
@@ -130,7 +99,6 @@ body {
 
             return rel_path
 
-        # Обработка изображений вне таблиц
         if not in_table:
             img_match = None
             is_markdown = False
@@ -147,7 +115,6 @@ body {
 
             if img_match:
                 src = img_match.group(2 if is_markdown else 1)
-
                 if not src.startswith("data:") and src.strip():
                     rel_path = process_image_match(img_match, is_markdown)
                     if rel_path:
@@ -175,7 +142,6 @@ body {
                             updated_img = updated_img.replace(src, rel_path)
                             line = f'<div class="figure-container">\n{updated_img}\n<span class="figure-caption">{caption}</span>\n</div>'
 
-        # Обработка изображений внутри таблиц
         md_images = list(re.finditer(r"!\[([^\]]*)\]\(([^)]+)\)", line))
         for match in md_images:
             process_image_match(match, is_markdown=True)
@@ -184,7 +150,6 @@ body {
         for match in html_images:
             process_image_match(match, is_markdown=False)
 
-        # Пропускаем строки с подписями без изображений
         if not in_table and re.match(
             r"^(?:Рисунок|Рис\.?)\s*[-–—]", stripped_line, re.IGNORECASE
         ):
@@ -195,21 +160,11 @@ body {
 
     content = "\n".join(new_lines)
 
-    # Обработка добавления стилей только если есть изображения
-    style_marker = "<!-- DOCX2MD STYLES -->"
-    if has_images:
-        # Если стили уже есть, ничего не делаем
-        if style_marker not in content:
-            # Удаляем маркер из CSS (если он там был)
-            clean_css = css.replace(style_marker, "").strip()
-            # Добавляем стили в конец файла
-            content = content.rstrip() + f"\n\n{style_marker}\n{clean_css}"
-
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)
 
 
-def process_tables(md_path):
+def process_tables(md_path, project_root):
     md_dir = os.path.dirname(md_path)
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -220,37 +175,15 @@ def process_tables(md_path):
     in_table = False
     has_tables = False
 
-    # Стили для таблиц
-    css = """<!-- DOCX2MD STYLES -->
-<style>
-.app_table-caption {
-    display: block;
-    text-align: left;
-    margin-top: 5px;
-}
-.app_table-caption:before {
-    content: "Таблица " counter(apptableCounter) " – ";
-    letter-spacing: 2pt;
-}
-body {
-    counter-reset: figureCounter apptableCounter;
-}
-.app_table-caption {
-    counter-increment: apptableCounter;
-}
-</style>"""
-
     while i < len(lines):
         line = lines[i]
         stripped_line = line.strip()
 
-        # Определяем, находимся ли мы внутри таблицы
         if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
             in_table = True
         elif in_table and not stripped_line.startswith("|"):
             in_table = False
 
-        # Обработка подписей таблиц вне таблиц
         if not in_table:
             caption_match = re.match(
                 r"^(?:Таблица|Табл\.?)\s*(?:\d+)?\s*[-–—]\s*(.*)$",
@@ -260,7 +193,7 @@ body {
             if caption_match:
                 caption = caption_match.group(1).strip()
                 print(f"Найдена подпись таблицы: {stripped_line} -> {caption}")
-                new_lines.append(f'<div class="app_table-caption">{caption}</div>')
+                new_lines.append(f'<div class="table-caption">{caption}</div>')
                 has_tables = True
                 i += 1
                 continue
@@ -269,46 +202,6 @@ body {
         i += 1
 
     content = "\n".join(new_lines)
-
-    # Обработка добавления стилей только если есть таблицы
-    style_marker = "<!-- DOCX2MD STYLES -->"
-    if has_tables:
-        if style_marker not in content:
-            clean_css = css.replace(style_marker, "").strip()
-            content = content.rstrip() + f"\n\n{style_marker}\n{clean_css}"
-        else:
-            # Проверяем, есть ли правило body с counter-reset
-            body_match = re.search(
-                r"(<!-- DOCX2MD STYLES -->\n<style>.*?body\s*\{[^}]*counter-reset:[^}]*\}.*?</style>)",
-                content,
-                flags=re.DOTALL,
-            )
-            if body_match:
-                # Проверяем, есть ли уже apptableCounter в counter-reset
-                if "apptableCounter" not in body_match.group(0):
-                    # Если apptableCounter отсутствует, добавляем его
-                    content = re.sub(
-                        r"(body\s*\{[^}]*counter-reset:\s*[^;}]*)(\s*[;}]?)",
-                        r"\1 apptableCounter\2",
-                        content,
-                        flags=re.DOTALL,
-                    )
-                # Добавляем стили .app_table-caption, если их ещё нет
-                if ".app_table-caption" not in content:
-                    content = re.sub(
-                        r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
-                        r'\1\2\n.app_table-caption {\n    display: block;\n    text-align: left;\n    margin-top: 5px;\n}\n.app_table-caption:before {\n    content: "Таблица " counter(apptableCounter) " – ";\n    letter-spacing: 2pt;\n}\n.app_table-caption {\n    counter-increment: apptableCounter;\n}\n\3',
-                        content,
-                        flags=re.DOTALL,
-                    )
-            else:
-                # Если правила body нет, добавляем его вместе со стилями .app_table-caption
-                content = re.sub(
-                    r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
-                    r'\1\2\nbody {\n    counter-reset: figureCounter apptableCounter;\n}\n.app_table-caption {\n    display: block;\n    text-align: left;\n    margin-top: 5px;\n}\n.app_table-caption:before {\n    content: "Таблица " counter(apptableCounter) " – ";\n    letter-spacing: 2pt;\n}\n.app_table-caption {\n    counter-increment: apptableCounter;\n}\n\3',
-                    content,
-                    flags=re.DOTALL,
-                )
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)

@@ -22,11 +22,12 @@ class EnhancedConverterThread(QThread):
     finished_all = pyqtSignal(int)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, files, output_folder, options):
+    def __init__(self, files, output_folder, options, project_root):
         super().__init__()
         self.files = files
         self.output_folder = output_folder
         self.options = options
+        self.project_root = project_root
         self._is_running = True
         self.processed_images = set()
 
@@ -89,13 +90,13 @@ class EnhancedConverterThread(QThread):
                         f"Конвертирован в Markdown: {filename}",
                     )
 
-                    process_images(output_path, temp_dir)
+                    process_images(output_path, temp_dir, self.project_root)
                     self.progress_updated.emit(
                         int((i / total_files) * 80 + 15),
                         f"Обработаны изображения: {filename}",
                     )
 
-                    process_tables(output_path)
+                    process_tables(output_path, self.project_root)
                     self.progress_updated.emit(
                         int((i / total_files) * 80 + 20),
                         f"Обработаны подписи таблиц: {filename}",
@@ -127,6 +128,50 @@ class EnhancedConverterThread(QThread):
                             self.error_occurred.emit(
                                 f"Ошибка обработки оглавления ({filename}): {str(e)}"
                             )
+
+                    # Проверяем наличие элементов после обработки
+                    with open(output_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    has_images = '<div class="figure-container">' in content
+                    has_tables = '<div class="app_table-caption">' in content
+                    print(
+                        f"Для {filename}: has_images={has_images}, has_tables={has_tables}"
+                    )
+
+                    # Добавляем стили в конец файла
+                    with open(output_path, "a", encoding="utf-8") as f:
+                        f.write("\n<style>\n")
+                        if has_images:
+                            css_images_path = os.path.join(
+                                self.project_root, "src", "css", "styles_images.css"
+                            )
+                            print(
+                                f"Проверяю путь к styles_images.css: {css_images_path}"
+                            )
+                            if os.path.exists(css_images_path):
+                                with open(
+                                    css_images_path, "r", encoding="utf-8"
+                                ) as css_file:
+                                    f.write(css_file.read())
+                                    print(f"Добавлены стили из {css_images_path}")
+                            else:
+                                print(f"Файл {css_images_path} не найден")
+                        if has_tables:
+                            css_tables_path = os.path.join(
+                                self.project_root, "src", "css", "styles_tables.css"
+                            )
+                            print(
+                                f"Проверяю путь к styles_tables.css: {css_tables_path}"
+                            )
+                            if os.path.exists(css_tables_path):
+                                with open(
+                                    css_tables_path, "r", encoding="utf-8"
+                                ) as css_file:
+                                    f.write(css_file.read())
+                                    print(f"Добавлены стили из {css_tables_path}")
+                            else:
+                                print(f"Файл {css_tables_path} не найден")
+                        f.write("\n</style>\n")
 
                 success_count += 1
                 self.conversion_finished.emit(

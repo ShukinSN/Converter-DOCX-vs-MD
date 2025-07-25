@@ -1,0 +1,15 @@
+.table-caption {
+    display: block;
+    text-align: left;
+    margin-top: 5px;
+}
+.table-caption:before {
+    content: "Таблица " counter(tableCounter) " – ";
+    letter-spacing: 2pt;
+}
+body {
+    counter-reset: tableCounter ;
+}
+.table-caption {
+    counter-increment: tableCounter;
+}
