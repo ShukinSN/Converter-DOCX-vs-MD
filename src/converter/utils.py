@@ -9,7 +9,10 @@ warnings.filterwarnings("ignore", category=UserWarning, module="wand.*")
 
 
 def sanitize_filename(name):  # Очистка имени файла от недопустимых символов.
-    return re.sub(r'[\\/*?:"<>|]', "_", name)
+
+    return re.sub(
+        r'[\\/*?:"<>|]', "_", name
+    )  # Заменяет недопустимые символы (\/*?:"<>|) в имени файла на подчеркивание (_)
 
 
 def convert_emf_to_png(emf_path):  # Конвертация EMF в PNG с обработкой ошибок.
@@ -44,6 +47,7 @@ def process_images(md_path, temp_dir, project_root):
         line = lines[i]
         stripped_line = line.strip()
 
+        # Проверяет, является ли строка началом таблицы Markdown (начинается с | и содержит другой |)
         if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
             in_table = True
         elif in_table and not stripped_line.startswith("|"):
@@ -93,6 +97,7 @@ def process_images(md_path, temp_dir, project_root):
             if is_markdown:
                 line = line.replace(src, rel_path)
             else:
+                # Заменяет путь в атрибуте src тега <img>, экранируя специальные символы в исходном пути
                 line = re.sub(
                     r'src="' + re.escape(src) + r'"', f'src="{rel_path}"', line
                 )
@@ -104,8 +109,14 @@ def process_images(md_path, temp_dir, project_root):
             is_markdown = False
 
             for pattern, md in [
-                (r"!\[([^\]]*)\]\(([^)]+)\)", True),
-                (r'<img\s+[^>]*src="([^"]+)"[^>]*>', False),
+                (
+                    r"!\[([^\]]*)\]\(([^)]+)\)",
+                    True,
+                ),  # Находит изображения в Markdown-формате вида ![alt](path)
+                (
+                    r'<img\s+[^>]*src="([^"]+)"[^>]*>',
+                    False,
+                ),  # Находит теги <img> в HTML с атрибутом src
             ]:
                 match = re.match(pattern, stripped_line)
                 if match:
@@ -123,6 +134,7 @@ def process_images(md_path, temp_dir, project_root):
                             if i + j >= len(lines):
                                 break
                             next_line = lines[i + j].strip()
+                            # Находит подписи к изображениям вида "Рисунок N - текст" или "Рис. - текст"
                             caption_match = re.match(
                                 r"^(?:Рисунок|Рис\.?)\s*(?:\d+)?\s*[-–—]\s*(.*)$",
                                 next_line,
@@ -136,20 +148,24 @@ def process_images(md_path, temp_dir, project_root):
                         if is_markdown:
                             line = f'<div class="figure-container">\n<img src="{rel_path}" alt="{img_match.group(1)}">\n<span class="figure-caption">{caption}</span>\n</div>'
                         else:
+                            # Удаляет атрибут alt из HTML-тега <img>
                             updated_img = re.sub(
                                 r'\s*alt="[^"]*"', "", img_match.group(0)
                             )
                             updated_img = updated_img.replace(src, rel_path)
                             line = f'<div class="figure-container">\n{updated_img}\n<span class="figure-caption">{caption}</span>\n</div>'
 
+        # Обрабатывает все Markdown-изображения в строке
         md_images = list(re.finditer(r"!\[([^\]]*)\]\(([^)]+)\)", line))
         for match in md_images:
             process_image_match(match, is_markdown=True)
 
+        # Обрабатывает все HTML-изображения в строке
         html_images = list(re.finditer(r'<img\s+[^>]*src="([^"]+)"[^>]*>', line))
         for match in html_images:
             process_image_match(match, is_markdown=False)
 
+        # Пропускает строки с подписями к изображениям
         if not in_table and re.match(
             r"^(?:Рисунок|Рис\.?)\s*[-–—]", stripped_line, re.IGNORECASE
         ):
@@ -179,12 +195,14 @@ def process_tables(md_path, project_root):
         line = lines[i]
         stripped_line = line.strip()
 
+        # Проверяет, является ли строка началом таблицы Markdown
         if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
             in_table = True
         elif in_table and not stripped_line.startswith("|"):
             in_table = False
 
         if not in_table:
+            # Находит подписи к таблицам вида "Таблица N - текст" или "Табл. - текст"
             caption_match = re.match(
                 r"^(?:Таблица|Табл\.?)\s*(?:\d+)?\s*[-–—]\s*(.*)$",
                 stripped_line,
@@ -213,7 +231,7 @@ def fix_links_and_toc(md_path):
         with open(md_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Исправление пробелов в ссылках
+        # Заменяет пробелы в URL-адресах Markdown-ссылок на %20
         content = re.sub(
             r"\[([^\]]+)\]\(([^)]+)\)",
             lambda m: f'[{m.group(1)}]({m.group(2).replace(" ", "%20")})',
@@ -227,13 +245,15 @@ def fix_links_and_toc(md_path):
             level = len(match.group(1))
             title = match.group(2).strip()
             anchor = re.sub(r"[^\w\s-]", "", title.lower())
+            # Преобразует заголовок в якорь, удаляя специальные символы
             anchor = re.sub(r"\s+", "-", anchor).strip("-")
             toc_entries.append((level, title, anchor))
             return f'<a id="{anchor}"></a>\n{match.group(0)}'
 
+        # Находит заголовки Markdown (начинающиеся с #) для создания якорей
         content = re.sub(r"^(#+)\s+(.+)$", make_anchor, content, flags=re.MULTILINE)
 
-        # Вставка оглавления
+        # Вставка оглавления, заменяя содержимое между "## Оглавление" и следующим заголовком
         if toc_entries and "## Оглавление" in content:
             toc = "## Оглавление\n\n" + "\n".join(
                 f"{'    ' * (level - 1)}- [{title}](#{anchor})"
@@ -274,7 +294,9 @@ def replace_image_links(md_path, replacement_rules=None):
         new_src = replacement_rules.get(base, base) + old_src[len(base) :]
         return match.group(0).replace(old_src, new_src)
 
+    # Заменяет пути в Markdown-изображениях согласно replacement_rules
     content = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", replace_md, content)
+    # Заменяет пути в HTML-тегах <img> согласно replacement_rules
     content = re.sub(r'<img[^>]+src="([^"]+)"[^>]*>', replace_html, content)
 
     with open(md_path, "w", encoding="utf-8") as f:
