@@ -7,19 +7,20 @@
 - **Python 3.8+**: Установите через [python.org](https://www.python.org/downloads/) или Homebrew (`brew install python`).
 - **Pandoc 2.14+**: Установите через Homebrew (`brew install pandoc`) или с [pandoc.org](https://pandoc.org/installing.html).
 - **ImageMagick**: Установите через Homebrew (`brew install imagemagick`).
+- **Ghostscript**: Необходим для обработки EMF-файлов. Установите через Homebrew (`brew install ghostscript`).
 - **Git** (опционально): Для клонирования репозитория (`brew install git`).
 
 ## Установка зависимостей
 
 1. Установите системные зависимости:
    ```bash
-   brew install python pandoc imagemagick
+   brew install python pandoc imagemagick ghostscript
    ```
 
 2. Клонируйте репозиторий:
    ```bash
-   git clone https://github.com/your-username/docx-to-markdown-converter.git
-   cd docx-to-markdown-converter
+   git clone https://github.com/ShukinSN/Converter-DOCX-vs-MD.git
+   cd Converter-DOCX-vs-MD
    ```
 
 3. Установите Python-зависимости:
@@ -36,25 +37,30 @@
 
 1. Выполните команду для сборки:
    ```bash
-   pyinstaller --onefile --windowed --name docx2md --add-data "src:src" src/main.py
+   pyinstaller --onefile --windowed --name Converter --add-data "src:src" src/main.py
    ```
 
    - `--onefile`: Создаёт единый исполняемый файл.
    - `--windowed`: Запускает приложение без консоли (для GUI).
-   - `--name docx2md`: Задаёт имя исполняемого файла.
+   - `--name Converter`: Задаёт имя исполняемого файла.
    - `--add-data "src:src"`: Включает папку `src` с модулями проекта.
 
-2. После успешной сборки найдите исполняемый файл `docx2md` в папке `dist/`.
+2. Альтернативно используйте файл спецификации:
+   ```bash
+   pyinstaller main.spec
+   ```
+
+3. После успешной сборки найдите исполняемый файл `Converter` в папке `dist/`.
 
 ## Запуск
 
-- Выполните `./dist/docx2md` или дважды щёлкните по файлу в Finder для запуска.
-- Убедитесь, что Pandoc и ImageMagick доступны в системе.
+- Выполните `./dist/Converter` или дважды щёлкните по файлу в Finder для запуска.
+- Убедитесь, что Pandoc, ImageMagick и Ghostscript доступны в системе.
 
 ## Устранение неполадок
 
 - **Ошибка "Pandoc не найден"**: Проверьте установку Pandoc (`pandoc --version`).
-- **Ошибка обработки EMF-файлов**: Убедитесь, что ImageMagick установлен (`magick -version`). Проверьте настройки ImageMagick для поддержки EMF.
+- **Ошибка обработки EMF-файлов**: Убедитесь, что ImageMagick (`magick -version`) и Ghostscript (`gs --version`) установлены.
 - **PyQt5 не работает**: Установите совместимую версию: `pip install PyQt5>=5.15`.
 - **Ошибка "Недоверенное приложение"**: Разрешите запуск в настройках безопасности macOS или используйте:
   ```bash

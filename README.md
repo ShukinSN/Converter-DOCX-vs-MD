@@ -16,13 +16,14 @@
 - **Python 3.8+**: Установите с [python.org](https://www.python.org/downloads/).
 - **Pandoc 2.14+**: Установите с [pandoc.org](https://pandoc.org/installing.html).
 - **ImageMagick**: Необходим для конвертации EMF в PNG. Установите с [imagemagick.org](https://imagemagick.org/script/download.php).
+- **Ghostscript**: Необходим для обработки EMF-файлов в ImageMagick. Установите с [ghostscript.com](https://ghostscript.com/releases/) или через пакетный менеджер (`brew install ghostscript` на macOS, `apt install ghostscript` на Linux).
 
 ## Установка
 
 1. Клонируйте репозиторий:
    ```bash
-   git clone https://github.com/your-username/docx-to-markdown-converter.git
-   cd docx-to-markdown-converter
+   git clone https://github.com/ShukinSN/Converter-DOCX-vs-MD.git
+   cd Converter-DOCX-vs-MD
    ```
 
 2. Установите зависимости:
@@ -52,7 +53,7 @@ python -m src.main
 ## Устранение неполадок
 
 - **Pandoc не найден**: Убедитесь, что Pandoc установлен и добавлен в PATH.
-- **Ошибки ImageMagick с EMF**: Проверьте, установлен ли ImageMagick, и разрешите обработку EMF в настройках (`/etc/ImageMagick-6/policy.xml` на Linux).
+- **Ошибки ImageMagick с EMF**: Проверьте, установлен ли ImageMagick (magick -version) и Ghostscript (gs --version). Разрешите обработку EMF в настройках ImageMagick (/etc/ImageMagick-6/policy.xml на Linux).
 - **Ошибки PyQt5**: Убедитесь, что установлена совместимая версия (`pip install PyQt5>=5.15`).
 
 ## Лицензия
