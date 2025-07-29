@@ -133,50 +133,123 @@ class EnhancedConverterThread(QThread):
                     with open(output_path, "r", encoding="utf-8") as f:
                         content = f.read()
                     has_images = '<div class="figure-container">' in content
-                    has_tables = '<div class="app_table-caption">' in content
+                    has_tables = '<div class="table-caption">' in content
                     print(
                         f"Для {filename}: has_images={has_images}, has_tables={has_tables}"
                     )
 
-                    # Добавляем стили в конец файла
-                    with open(output_path, "a", encoding="utf-8") as f:
-                        f.write("\n<style>\n")
-                        if has_images:
-                            css_images_path = os.path.join(
-                                self.project_root, "src", "css", "styles_images.css"
-                            )
-                            print(
-                                f"Проверяю путь к styles_images.css: {css_images_path}"
-                            )
-                            if os.path.exists(css_images_path):
-                                with open(
-                                    css_images_path, "r", encoding="utf-8"
-                                ) as css_file:
-                                    f.write(css_file.read())
-                                    print(f"Добавлены стили из {css_images_path}")
+                    # Добавляем стили в конец файла с объединением и обработкой ошибок
+                    style_marker = "<!-- DOCX2MD STYLES -->"
+                    if has_images or has_tables:
+                        try:
+                            with open(output_path, "r", encoding="utf-8") as f:
+                                content = f.read()
+                            if style_marker not in content:
+                                styles = ""
+                                with open(output_path, "a", encoding="utf-8") as f:
+                                    f.write(f"\n\n{style_marker}\n<style>\n")
+                                    if has_images:
+                                        css_images_path = os.path.join(
+                                            self.project_root,
+                                            "src",
+                                            "css",
+                                            "styles_images.css",
+                                        )
+                                        print(
+                                            f"Проверяю путь к styles_images.css: {css_images_path}"
+                                        )
+                                        if os.path.exists(css_images_path):
+                                            with open(
+                                                css_images_path, "r", encoding="utf-8"
+                                            ) as css_file:
+                                                styles += css_file.read()
+                                                print(
+                                                    f"Добавлены стили из {css_images_path}"
+                                                )
+                                        else:
+                                            print(f"Файл {css_images_path} не найден")
+                                    if has_tables:
+                                        css_tables_path = os.path.join(
+                                            self.project_root,
+                                            "src",
+                                            "css",
+                                            "styles_tables.css",
+                                        )
+                                        print(
+                                            f"Проверяю путь к styles_tables.css: {css_tables_path}"
+                                        )
+                                        if os.path.exists(css_tables_path):
+                                            with open(
+                                                css_tables_path, "r", encoding="utf-8"
+                                            ) as css_file:
+                                                styles += css_file.read()
+                                                print(
+                                                    f"Добавлены стили из {css_tables_path}"
+                                                )
+                                        else:
+                                            print(f"Файл {css_tables_path} не найден")
+                                    # Убедимся, что styles не пустой перед записью
+                                    if styles:
+                                        f.write(styles.strip() + "\n")
+                                    f.write("</style>\n")
+                                    print(f"Записан полный тег <style> для {filename}")
                             else:
-                                print(f"Файл {css_images_path} не найден")
-                        if has_tables:
-                            css_tables_path = os.path.join(
-                                self.project_root, "src", "css", "styles_tables.css"
-                            )
+                                # Обновляем существующий <style>, если он есть
+                                updated_content = content
+                                if has_images:
+                                    css_images_path = os.path.join(
+                                        self.project_root,
+                                        "src",
+                                        "css",
+                                        "styles_images.css",
+                                    )
+                                    if os.path.exists(css_images_path):
+                                        with open(
+                                            css_images_path, "r", encoding="utf-8"
+                                        ) as css_file:
+                                            css_content = css_file.read().strip()
+                                            if ".figure-container" not in content:
+                                                updated_content = re.sub(
+                                                    r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
+                                                    r"\1\2\n" + css_content + "\n\3",
+                                                    updated_content,
+                                                    flags=re.DOTALL,
+                                                )
+                                if has_tables:
+                                    css_tables_path = os.path.join(
+                                        self.project_root,
+                                        "src",
+                                        "css",
+                                        "styles_tables.css",
+                                    )
+                                    if os.path.exists(css_tables_path):
+                                        with open(
+                                            css_tables_path, "r", encoding="utf-8"
+                                        ) as css_file:
+                                            css_content = css_file.read().strip()
+                                            if ".table-caption" not in content:
+                                                updated_content = re.sub(
+                                                    r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
+                                                    r"\1\2\n" + css_content + "\n\3",
+                                                    updated_content,
+                                                    flags=re.DOTALL,
+                                                )
+                                if updated_content != content:
+                                    with open(output_path, "w", encoding="utf-8") as f:
+                                        f.write(updated_content)
+                                        print(f"Обновлён тег <style> для {filename}")
+                        except Exception as e:
                             print(
-                                f"Проверяю путь к styles_tables.css: {css_tables_path}"
+                                f"Ошибка при добавлении стилей для {filename}: {str(e)}"
                             )
-                            if os.path.exists(css_tables_path):
-                                with open(
-                                    css_tables_path, "r", encoding="utf-8"
-                                ) as css_file:
-                                    f.write(css_file.read())
-                                    print(f"Добавлены стили из {css_tables_path}")
-                            else:
-                                print(f"Файл {css_tables_path} не найден")
-                        f.write("\n</style>\n")
+                            self.error_occurred.emit(
+                                f"Ошибка при добавлении стилей ({filename}): {str(e)}"
+                            )
 
-                success_count += 1
-                self.conversion_finished.emit(
-                    filename, f"Успешно: {safe_name}.md", output_path
-                )
+                    success_count += 1
+                    self.conversion_finished.emit(
+                        filename, f"Успешно: {safe_name}.md", output_path
+                    )
 
             except Exception as e:
                 error_msg = f"Ошибка ({filename}): {str(e)}"

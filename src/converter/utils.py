@@ -9,10 +9,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="wand.*")
 
 
 def sanitize_filename(name):  # Очистка имени файла от недопустимых символов.
-
-    return re.sub(
-        r'[\\/*?:"<>|]', "_", name
-    )  # Заменяет недопустимые символы (\/*?:"<>|) в имени файла на подчеркивание (_)
+    return re.sub(r'[\\/*?:"<>|]', "_", name)
 
 
 def convert_emf_to_png(emf_path):  # Конвертация EMF в PNG с обработкой ошибок.
@@ -47,7 +44,7 @@ def process_images(md_path, temp_dir, project_root):
         line = lines[i]
         stripped_line = line.strip()
 
-        # Проверяет, является ли строка началом таблицы Markdown (начинается с | и содержит другой |)
+        # Проверяет, является ли строка началом таблицы Markdown
         if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
             in_table = True
         elif in_table and not stripped_line.startswith("|"):
@@ -97,7 +94,6 @@ def process_images(md_path, temp_dir, project_root):
             if is_markdown:
                 line = line.replace(src, rel_path)
             else:
-                # Заменяет путь в атрибуте src тега <img>, экранируя специальные символы в исходном пути
                 line = re.sub(
                     r'src="' + re.escape(src) + r'"', f'src="{rel_path}"', line
                 )
@@ -109,14 +105,8 @@ def process_images(md_path, temp_dir, project_root):
             is_markdown = False
 
             for pattern, md in [
-                (
-                    r"!\[([^\]]*)\]\(([^)]+)\)",
-                    True,
-                ),  # Находит изображения в Markdown-формате вида ![alt](path)
-                (
-                    r'<img\s+[^>]*src="([^"]+)"[^>]*>',
-                    False,
-                ),  # Находит теги <img> в HTML с атрибутом src
+                (r"!\[([^\]]*)\]\(([^)]+)\)", True),
+                (r'<img\s+[^>]*src="([^"]+)"[^>]*>', False),
             ]:
                 match = re.match(pattern, stripped_line)
                 if match:
@@ -134,7 +124,6 @@ def process_images(md_path, temp_dir, project_root):
                             if i + j >= len(lines):
                                 break
                             next_line = lines[i + j].strip()
-                            # Находит подписи к изображениям вида "Рисунок N - текст" или "Рис. - текст"
                             caption_match = re.match(
                                 r"^(?:Рисунок|Рис\.?)\s*(?:\d+)?\s*[-–—]\s*(.*)$",
                                 next_line,
@@ -148,7 +137,6 @@ def process_images(md_path, temp_dir, project_root):
                         if is_markdown:
                             line = f'<div class="figure-container">\n<img src="{rel_path}" alt="{img_match.group(1)}">\n<span class="figure-caption">{caption}</span>\n</div>'
                         else:
-                            # Удаляет атрибут alt из HTML-тега <img>
                             updated_img = re.sub(
                                 r'\s*alt="[^"]*"', "", img_match.group(0)
                             )
@@ -198,6 +186,7 @@ def process_tables(md_path, project_root):
         # Проверяет, является ли строка началом таблицы Markdown
         if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
             in_table = True
+            has_tables = True
         elif in_table and not stripped_line.startswith("|"):
             in_table = False
 
@@ -220,6 +209,29 @@ def process_tables(md_path, project_root):
         i += 1
 
     content = "\n".join(new_lines)
+
+    # Добавляем стили для таблиц, если они обнаружены
+    style_marker = "<!-- DOCX2MD STYLES -->"
+    if has_tables:
+        css_tables_path = os.path.join(project_root, "src", "css", "styles_tables.css")
+        if os.path.exists(css_tables_path):
+            try:
+                with open(css_tables_path, "r", encoding="utf-8") as css_file:
+                    css_content = css_file.read().strip()
+                    if style_marker not in content:
+                        content += (
+                            f"\n\n{style_marker}\n<style>\n{css_content}\n</style>"
+                        )
+                    else:
+                        # Обновляем существующие стили, добавляя недостающие правила
+                        content = re.sub(
+                            r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
+                            r"\1\2\n" + css_content + "\n\3",
+                            content,
+                            flags=re.DOTALL,
+                        )
+            except Exception as e:
+                print(f"Ошибка при чтении стилей из {css_tables_path}: {str(e)}")
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)
