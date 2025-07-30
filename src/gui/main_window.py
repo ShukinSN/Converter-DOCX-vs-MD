@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -15,7 +16,6 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QGroupBox,
     QCheckBox,
-    QTabWidget,
     QListWidget,
     QListWidgetItem,
 )
@@ -32,15 +32,9 @@ class DocxToMarkdownConverter(QMainWindow):
         self.thread = None
         self.preview_window = None
         self.settings = QSettings("DOCX2MD", "EnhancedConverter")
-        # Определяем корневую директорию проекта
-        self.project_root = os.path.dirname(os.path.abspath(__file__))
-        while not os.path.exists(os.path.join(self.project_root, "src")):
-            self.project_root = os.path.dirname(self.project_root)
-            if self.project_root == os.path.dirname(self.project_root):
-                raise Exception("Не удалось найти корень проекта с директорией src/")
+        self.project_root = Path(__file__).resolve().parents[2]
         self.init_ui()
         self.load_settings()
-        QTimer.singleShot(100, self.check_pandoc_installation)
 
     def init_ui(self):
         self.setWindowTitle("DOCX to Markdown Converter")
@@ -126,17 +120,6 @@ class DocxToMarkdownConverter(QMainWindow):
         self.file_list.itemDoubleClicked.connect(self.preview_file)
         self.open_folder_btn.clicked.connect(self.open_output_folder)
         self.output_path_edit.textChanged.connect(self.update_open_folder_btn_state)
-
-    def check_pandoc_installation(self):
-        try:
-            pypandoc.get_pandoc_version()
-        except OSError:
-            QMessageBox.critical(
-                self,
-                "Pandoc не найден",
-                "Для работы программы требуется Pandoc.\n\n"
-                "Установите его с официального сайта: https://pandoc.org/installing.html",
-            )
 
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -224,7 +207,7 @@ class DocxToMarkdownConverter(QMainWindow):
             [self.file_list.item(i).text() for i in range(self.file_list.count())],
             self.output_path_edit.text(),
             options,
-            self.project_root,  # Передаём корень проекта
+            self.project_root,
         )
 
         self.thread.progress_updated.connect(self.update_progress)
@@ -310,18 +293,16 @@ class DocxToMarkdownConverter(QMainWindow):
         event.accept()
 
     def update_open_folder_btn_state(self):
-        """Активирует кнопку открытия папки только если путь существует"""
         path = self.output_path_edit.text()
         self.open_folder_btn.setEnabled(bool(path.strip() and os.path.isdir(path)))
 
     def open_output_folder(self):
-        """Открывает папку для сохранения в проводнике ОС"""
         path = self.output_path_edit.text()
         if os.path.isdir(path):
             try:
-                if os.name == "nt":  # Для Windows
+                if os.name == "nt":
                     os.startfile(path)
-                elif os.name == "posix":  # Для Linux/Mac
+                elif os.name == "posix":
                     if sys.platform == "darwin":
                         subprocess.Popen(["open", path])
                     else:

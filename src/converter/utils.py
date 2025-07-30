@@ -1,23 +1,22 @@
-import os
 import re
 import shutil
-from datetime import datetime
+from pathlib import Path
 from wand.image import Image
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="wand.*")
 
 
-def sanitize_filename(name):  # Очистка имени файла от недопустимых символов.
+def sanitize_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "_", name)
 
 
-def convert_emf_to_png(emf_path):  # Конвертация EMF в PNG с обработкой ошибок.
+def convert_emf_to_png(emf_path):
     try:
-        png_path = os.path.splitext(emf_path)[0] + ".png"
-        with Image(filename=emf_path) as img:
+        png_path = Path(emf_path).with_suffix(".png")
+        with Image(filename=str(emf_path)) as img:
             img.format = "png"
-            img.save(filename=png_path)
+            img.save(filename=str(png_path))
         return png_path
     except Exception as e:
         print(f"Ошибка конвертации {emf_path} в PNG: {str(e)}")
@@ -25,9 +24,12 @@ def convert_emf_to_png(emf_path):  # Конвертация EMF в PNG с обр
 
 
 def process_images(md_path, temp_dir, project_root):
-    md_dir = os.path.dirname(md_path)
-    images_folder = os.path.join(md_dir, "images")
-    os.makedirs(images_folder, exist_ok=True)
+    from datetime import datetime
+
+    md_path = Path(md_path)
+    md_dir = md_path.parent
+    images_folder = md_dir / "images"
+    images_folder.mkdir(exist_ok=True)
 
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -44,7 +46,6 @@ def process_images(md_path, temp_dir, project_root):
         line = lines[i]
         stripped_line = line.strip()
 
-        # Проверяет, является ли строка началом таблицы Markdown
         if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
             in_table = True
         elif in_table and not stripped_line.startswith("|"):
@@ -57,22 +58,22 @@ def process_images(md_path, temp_dir, project_root):
                 return None
 
             has_images = True
-            original_name = os.path.basename(src.split("?")[0])
-            name, ext = os.path.splitext(original_name)
+            original_name = Path(src.split("?")[0]).name
+            name, ext = Path(original_name).stem, Path(original_name).suffix
             img_name = f"{name}_{timestamp}{ext.lower()}"
             img_name = sanitize_filename(img_name)
 
             possible_paths = [
-                os.path.join(temp_dir, "media", original_name),
-                os.path.join(temp_dir, original_name),
-                os.path.join(md_dir, original_name),
+                Path(temp_dir) / "media" / original_name,
+                Path(temp_dir) / original_name,
+                md_dir / original_name,
             ]
-            src_path = next((p for p in possible_paths if os.path.exists(p)), None)
+            src_path = next((p for p in possible_paths if p.exists()), None)
 
             if not src_path:
                 return None
 
-            if src_path.lower().endswith(".emf"):
+            if src_path.suffix.lower() == ".emf":
                 png_path = convert_emf_to_png(src_path)
                 if png_path:
                     src_path = png_path
@@ -80,16 +81,16 @@ def process_images(md_path, temp_dir, project_root):
                     ext = ".png"
 
             file_counter = 1
-            while os.path.exists(os.path.join(images_folder, img_name)):
-                base_name = os.path.splitext(img_name)[0]
+            while (images_folder / img_name).exists():
+                base_name = Path(img_name).stem
                 if "_" in base_name:
                     base_name = base_name.rsplit("_", 1)[0]
                 img_name = f"{base_name}_{file_counter}{ext}"
                 file_counter += 1
 
-            dest_path = os.path.join(images_folder, img_name)
+            dest_path = images_folder / img_name
             shutil.copy2(src_path, dest_path)
-            rel_path = os.path.relpath(dest_path, md_dir).replace("\\", "/")
+            rel_path = dest_path.relative_to(md_dir).as_posix()
 
             if is_markdown:
                 line = line.replace(src, rel_path)
@@ -143,17 +144,14 @@ def process_images(md_path, temp_dir, project_root):
                             updated_img = updated_img.replace(src, rel_path)
                             line = f'<div class="figure-container">\n{updated_img}\n<span class="figure-caption">{caption}</span>\n</div>'
 
-        # Обрабатывает все Markdown-изображения в строке
         md_images = list(re.finditer(r"!\[([^\]]*)\]\(([^)]+)\)", line))
         for match in md_images:
             process_image_match(match, is_markdown=True)
 
-        # Обрабатывает все HTML-изображения в строке
         html_images = list(re.finditer(r'<img\s+[^>]*src="([^"]+)"[^>]*>', line))
         for match in html_images:
             process_image_match(match, is_markdown=False)
 
-        # Пропускает строки с подписями к изображениям
         if not in_table and re.match(
             r"^(?:Рисунок|Рис\.?)\s*[-–—]", stripped_line, re.IGNORECASE
         ):
@@ -169,7 +167,9 @@ def process_images(md_path, temp_dir, project_root):
 
 
 def process_tables(md_path, project_root):
-    md_dir = os.path.dirname(md_path)
+    md_path = Path(md_path)
+    md_dir = md_path.parent
+    project_root = Path(project_root)
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -183,7 +183,6 @@ def process_tables(md_path, project_root):
         line = lines[i]
         stripped_line = line.strip()
 
-        # Проверяет, является ли строка началом таблицы Markdown
         if not in_table and stripped_line.startswith("|") and "|" in stripped_line[1:]:
             in_table = True
             has_tables = True
@@ -191,7 +190,6 @@ def process_tables(md_path, project_root):
             in_table = False
 
         if not in_table:
-            # Находит подписи к таблицам вида "Таблица N - текст" или "Табл. - текст"
             caption_match = re.match(
                 r"^(?:Таблица|Табл\.?)\s*(?:\d+)?\s*[-–—]\s*(.*)$",
                 stripped_line,
@@ -210,62 +208,43 @@ def process_tables(md_path, project_root):
 
     content = "\n".join(new_lines)
 
-    # Добавляем стили для таблиц, если они обнаружены
-    style_marker = "<!-- DOCX2MD STYLES -->"
     if has_tables:
-        css_tables_path = os.path.join(project_root, "src", "css", "styles_tables.css")
-        if os.path.exists(css_tables_path):
-            try:
-                with open(css_tables_path, "r", encoding="utf-8") as css_file:
-                    css_content = css_file.read().strip()
-                    if style_marker not in content:
-                        content += (
-                            f"\n\n{style_marker}\n<style>\n{css_content}\n</style>"
-                        )
-                    else:
-                        # Обновляем существующие стили, добавляя недостающие правила
-                        content = re.sub(
-                            r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
-                            r"\1\2\n" + css_content + "\n\3",
-                            content,
-                            flags=re.DOTALL,
-                        )
-            except Exception as e:
-                print(f"Ошибка при чтении стилей из {css_tables_path}: {str(e)}")
+        try:
+            append_or_update_styles(
+                md_path, project_root, has_images=False, has_tables=True
+            )
+            print(f"Обработаны стили таблиц для {md_path.name}")
+        except Exception as e:
+            print(f"Ошибка при добавлении стилей таблиц для {md_path.name}: {str(e)}")
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)
 
 
 def fix_links_and_toc(md_path):
-    """Обработка ссылок и создание оглавления."""
+    md_path = Path(md_path)
     try:
         with open(md_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Заменяет пробелы в URL-адресах Markdown-ссылок на %20
         content = re.sub(
             r"\[([^\]]+)\]\(([^)]+)\)",
             lambda m: f'[{m.group(1)}]({m.group(2).replace(" ", "%20")})',
             content,
         )
 
-        # Создание якорей и оглавления
         toc_entries = []
 
         def make_anchor(match):
             level = len(match.group(1))
             title = match.group(2).strip()
             anchor = re.sub(r"[^\w\s-]", "", title.lower())
-            # Преобразует заголовок в якорь, удаляя специальные символы
             anchor = re.sub(r"\s+", "-", anchor).strip("-")
             toc_entries.append((level, title, anchor))
             return f'<a id="{anchor}"></a>\n{match.group(0)}'
 
-        # Находит заголовки Markdown (начинающиеся с #) для создания якорей
         content = re.sub(r"^(#+)\s+(.+)$", make_anchor, content, flags=re.MULTILINE)
 
-        # Вставка оглавления, заменяя содержимое между "## Оглавление" и следующим заголовком
         if toc_entries and "## Оглавление" in content:
             toc = "## Оглавление\n\n" + "\n".join(
                 f"{'    ' * (level - 1)}- [{title}](#{anchor})"
@@ -286,7 +265,7 @@ def fix_links_and_toc(md_path):
 
 
 def replace_image_links(md_path, replacement_rules=None):
-    """Замена ссылок на изображения по правилам."""
+    md_path = Path(md_path)
     if not replacement_rules:
         return
 
@@ -306,10 +285,49 @@ def replace_image_links(md_path, replacement_rules=None):
         new_src = replacement_rules.get(base, base) + old_src[len(base) :]
         return match.group(0).replace(old_src, new_src)
 
-    # Заменяет пути в Markdown-изображениях согласно replacement_rules
     content = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", replace_md, content)
-    # Заменяет пути в HTML-тегах <img> согласно replacement_rules
     content = re.sub(r'<img[^>]+src="([^"]+)"[^>]*>', replace_html, content)
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(content)
+
+
+def append_or_update_styles(md_path, project_root, has_images, has_tables):
+    md_path = Path(md_path)
+    project_root = Path(project_root)
+    style_marker = "<!-- DOCX2MD STYLES -->"
+
+    with open(md_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    styles = []
+    if has_images:
+        css_images_path = project_root / "src" / "css" / "styles_images.css"
+        if css_images_path.exists():
+            with open(css_images_path, "r", encoding="utf-8") as css_file:
+                styles.append(css_file.read().strip())
+        else:
+            print(f"Файл {css_images_path} не найден")
+
+    if has_tables:
+        css_tables_path = project_root / "src" / "css" / "styles_tables.css"
+        if css_tables_path.exists():
+            with open(css_tables_path, "r", encoding="utf-8") as css_file:
+                styles.append(css_file.read().strip())
+        else:
+            print(f"Файл {css_tables_path} не найден")
+
+    if styles:
+        combined_styles = "\n".join(styles)
+        if style_marker not in content:
+            content += f"\n\n{style_marker}\n<style>\n{combined_styles}\n</style>"
+        else:
+            content = re.sub(
+                r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
+                f"\\1{combined_styles}\n\\3",
+                content,
+                flags=re.DOTALL,
+            )
+
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(content)

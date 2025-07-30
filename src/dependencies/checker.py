@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QMessageBox
 import pypandoc
-from wand.api import library
+import wand.version
 
 
 class DependencyChecker:
@@ -17,9 +17,7 @@ class DependencyChecker:
             missing.append("Pandoc (установите с https://pandoc.org/installing.html)")
 
         try:
-            from wand import version
-
-            imagemagick_version = version.MAGICK_VERSION
+            imagemagick_version = wand.version.MAGICK_VERSION
             if not imagemagick_version:
                 missing.append("ImageMagick (установите с https://imagemagick.org/)")
         except (ImportError, AttributeError):

@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+from pathlib import Path
 import markdown
 
 
@@ -16,6 +17,7 @@ class ModernPreviewWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowTitle("Предпросмотр Markdown")
         self.setGeometry(200, 200, 800, 600)
+        self.project_root = Path(__file__).resolve().parents[2]
         self.init_ui()
 
     def init_ui(self):
@@ -44,26 +46,28 @@ class ModernPreviewWindow(QMainWindow):
         self.markdown_view.setPlainText(content)
         try:
             html = markdown.markdown(content, extensions=["fenced_code", "codehilite"])
-            # Добавление CSS для поддержки нумерации рисунков
-            css = """<style>
-/* initialise the counter */
-body { counter-reset: figureCounter; }
-/* increment the counter for every instance of a figure */
-figure { counter-increment: figureCounter; }
-/* prepend the counter to the figcaption content */
-figure figcaption:before {
-    content: "Рисунок " counter(figureCounter) " - ";
-}
-figure figcaption {
-    text-align: center;
-    margin-top: 8px;
-}
-</style>
-"""
-            html = css + "\n" + html
+            styles = []
+            css_images_path = self.project_root / "src" / "css" / "styles_images.css"
+            css_tables_path = self.project_root / "src" / "css" / "styles_tables.css"
+
+            if css_images_path.exists():
+                with open(css_images_path, "r", encoding="utf-8") as css_file:
+                    styles.append(css_file.read().strip())
+            else:
+                print(f"Файл {css_images_path} не найден")
+
+            if css_tables_path.exists():
+                with open(css_tables_path, "r", encoding="utf-8") as css_file:
+                    styles.append(css_file.read().strip())
+            else:
+                print(f"Файл {css_tables_path} не найден")
+
+            combined_styles = "\n".join(styles) if styles else ""
+            html = f"<style>\n{combined_styles}\n</style>\n{html}"
             self.html_view.setHtml(html)
         except Exception as e:
             self.html_view.setPlainText(f"Ошибка конвертации в HTML: {str(e)}")
+            print(f"Ошибка конвертации в HTML: {str(e)}")
 
     def closeEvent(self, event):
         if self.parent():
