@@ -298,18 +298,22 @@ class DocxToMarkdownConverter(QMainWindow):
 
     def open_output_folder(self):
         path = self.output_path_edit.text()
-        if os.path.isdir(path):
-            try:
-                if os.name == "nt":
-                    os.startfile(path)
-                elif os.name == "posix":
-                    if sys.platform == "darwin":
-                        subprocess.Popen(["open", path])
-                    else:
-                        subprocess.Popen(["xdg-open", path])
-            except Exception as e:
-                QMessageBox.warning(
-                    self, "Ошибка", f"Не удалось открыть папку:\n{str(e)}"
-                )
-        else:
-            QMessageBox.warning(self, "Ошибка", "Указанная папка не существует")
+        if not path.strip():
+            print("Путь не указан")
+            return
+
+        try:
+            path = Path(path).resolve()
+            if path.is_dir():
+                if sys.platform == "win32":
+                    os.startfile(str(path))
+                    print(f"Открыта папка: {path}")
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", str(path)], check=True)
+                    print(f"Открыта папка (macOS): {path}")
+                else:
+                    subprocess.run(["xdg-open", str(path)], check=True)
+                    print(f"Открыта папка (Linux): {path}")
+        except Exception as e:
+            print(f"Ошибка открытия папки: {str(e)}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось открыть папку:\n{str(e)}")
