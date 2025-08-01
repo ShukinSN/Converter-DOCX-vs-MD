@@ -179,23 +179,32 @@ class DocxToMarkdownConverter(QMainWindow):
 
     def start_conversion(self):
         if self.file_list.count() == 0:
+            print("Нет файлов для конвертации")
             QMessageBox.warning(self, "Нет файлов", "Добавьте файлы для конвертации")
             return
 
-        if not self.output_path_edit.text().strip():
+        output_path = self.output_path_edit.text().strip()
+        if not output_path:
+            print("Не указана папка для сохранения")
             QMessageBox.warning(
                 self, "Не выбрана папка", "Укажите папку для сохранения результатов"
             )
             return
 
-        if not os.path.exists(self.output_path_edit.text()):
-            try:
-                os.makedirs(self.output_path_edit.text())
-            except OSError as e:
-                QMessageBox.critical(
-                    self, "Ошибка", f"Не удалось создать папку:\n{str(e)}"
-                )
-                return
+        try:
+            output_path = Path(output_path).resolve()
+            if not output_path.exists():
+                output_path.mkdir(parents=True)
+                print(f"Создана папка: {output_path}")
+            elif not os.access(output_path, os.W_OK):
+                print(f"Нет прав на запись в папку: {output_path}")
+                raise PermissionError(f"Нет прав на запись в папку: {output_path}")
+        except Exception as e:
+            print(f"Ошибка доступа к папке: {str(e)}")
+            QMessageBox.critical(
+                self, "Ошибка", f"Не удалось создать/использовать папку:\n{str(e)}"
+            )
+            return
 
         options = {
             "toc": self.toc_cb.isChecked(),
