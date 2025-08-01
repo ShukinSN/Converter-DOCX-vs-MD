@@ -130,7 +130,7 @@ class EnhancedConverterThread(QThread):
                                 f"Ошибка обработки оглавления ({filename}): {str(e)}"
                             )
 
-                    with open(output_path, "r", encoding="utf-8") as f:
+                    with open(output_path, "r", encoding="utf-8-sig") as f:
                         content = f.read()
                     has_images = '<div class="figure-container">' in content
                     has_tables = '<div class="table-caption">' in content
