@@ -45,24 +45,29 @@ class EnhancedConverterThread(QThread):
             )
 
             try:
-                input_path = Path(input_path)
+                # Получаем абсолютный путь и проверяем файл
+                input_path = Path(input_path).resolve()
+                if not input_path.exists():
+                    raise FileNotFoundError(f"Файл не найден: {filename}")
                 if not os.access(input_path, os.R_OK):
                     raise PermissionError(f"Нет прав на чтение файла: {filename}")
 
-                if not os.access(self.output_folder, os.W_OK):
+                # Проверяем папку для сохранения
+                output_folder = Path(self.output_folder).resolve()
+                if not output_folder.exists():
+                    output_folder.mkdir(parents=True)
+                if not os.access(output_folder, os.W_OK):
                     raise PermissionError(
                         f"Нет прав на запись в папку: {self.output_folder}"
                     )
 
-                if not input_path.exists():
-                    raise FileNotFoundError(f"Файл не найден: {filename}")
-
+                # Проверяем что файл является валидным DOCX
                 if not zipfile.is_zipfile(input_path):
                     raise ValueError(f"Неверный формат DOCX: {filename}")
 
                 base_name = input_path.stem
                 safe_name = sanitize_filename(base_name)
-                output_path = Path(self.output_folder) / f"{safe_name}.md"
+                output_path = output_folder / f"{safe_name}.md"
 
                 if output_path.exists() and not self.options.get("overwrite"):
                     raise FileExistsError(f"Файл уже существует: {output_path}")
@@ -78,31 +83,44 @@ class EnhancedConverterThread(QThread):
                     if self.options.get("preserve_tabs"):
                         extra_args.append("--preserve-tabs")
 
-                    pypandoc.convert_file(
-                        input_path,
-                        "markdown",
-                        outputfile=str(output_path),
-                        format="docx",
-                        extra_args=extra_args,
-                    )
+                    # Конвертация с обработкой путей
+                    try:
+                        pypandoc.convert_file(
+                            str(input_path),
+                            "markdown",
+                            outputfile=str(output_path),
+                            format="docx",
+                            extra_args=extra_args,
+                        )
+                    except Exception as e:
+                        raise RuntimeError(f"Ошибка Pandoc: {str(e)}")
 
                     self.progress_updated.emit(
                         int((i / total_files) * 80 + 10),
                         f"Конвертирован в Markdown: {filename}",
                     )
 
-                    process_images(output_path, temp_dir, self.project_root)
-                    self.progress_updated.emit(
-                        int((i / total_files) * 80 + 15),
-                        f"Обработаны изображения: {filename}",
-                    )
+                    # Обработка изображений
+                    try:
+                        process_images(output_path, temp_dir, self.project_root)
+                        self.progress_updated.emit(
+                            int((i / total_files) * 80 + 15),
+                            f"Обработаны изображения: {filename}",
+                        )
+                    except Exception as e:
+                        raise RuntimeError(f"Ошибка обработки изображений: {str(e)}")
 
-                    process_tables(output_path, self.project_root)
-                    self.progress_updated.emit(
-                        int((i / total_files) * 80 + 20),
-                        f"Обработаны подписи таблиц: {filename}",
-                    )
+                    # Обработка таблиц
+                    try:
+                        process_tables(output_path, self.project_root)
+                        self.progress_updated.emit(
+                            int((i / total_files) * 80 + 20),
+                            f"Обработаны подписи таблиц: {filename}",
+                        )
+                    except Exception as e:
+                        raise RuntimeError(f"Ошибка обработки таблиц: {str(e)}")
 
+                    # Замена ссылок на изображения
                     replacement_rules = {}
                     media_dir = Path(temp_dir) / "media"
                     if media_dir.exists():
@@ -111,13 +129,18 @@ class EnhancedConverterThread(QThread):
                                 old_path = f"media/{f.name}"
                                 new_path = f"images/{f.name}"
                                 replacement_rules[old_path] = new_path
-                    if replacement_rules:
-                        replace_image_links(output_path, replacement_rules)
-                        self.progress_updated.emit(
-                            int((i / total_files) * 80 + 25),
-                            f"Заменены ссылки на изображения: {filename}",
-                        )
 
+                    if replacement_rules:
+                        try:
+                            replace_image_links(output_path, replacement_rules)
+                            self.progress_updated.emit(
+                                int((i / total_files) * 80 + 25),
+                                f"Заменены ссылки на изображения: {filename}",
+                            )
+                        except Exception as e:
+                            raise RuntimeError(f"Ошибка замены ссылок: {str(e)}")
+
+                    # Оглавление
                     if self.options.get("toc"):
                         try:
                             fix_links_and_toc(output_path)
@@ -130,24 +153,18 @@ class EnhancedConverterThread(QThread):
                                 f"Ошибка обработки оглавления ({filename}): {str(e)}"
                             )
 
+                    # Добавление стилей
                     with open(output_path, "r", encoding="utf-8-sig") as f:
                         content = f.read()
                     has_images = '<div class="figure-container">' in content
                     has_tables = '<div class="table-caption">' in content
-                    print(
-                        f"Для {filename}: has_images={has_images}, has_tables={has_tables}"
-                    )
 
                     if has_images or has_tables:
                         try:
                             append_or_update_styles(
                                 output_path, self.project_root, has_images, has_tables
                             )
-                            print(f"Обработаны стили для {filename}")
                         except Exception as e:
-                            print(
-                                f"Ошибка при добавлении стилей для {filename}: {str(e)}"
-                            )
                             self.error_occurred.emit(
                                 f"Ошибка при добавлении стилей ({filename}): {str(e)}"
                             )

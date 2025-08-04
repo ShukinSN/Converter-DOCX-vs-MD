@@ -1,0 +1,39 @@
+.app-container {
+    text-align: center;
+    margin: 15px 0;
+}
+.app-container img {
+    display: inline-block;
+    max-width: 100%;
+    height: auto;
+}
+.app-caption {
+    display: block;
+    text-align: center;
+    font-style: italic;
+    margin-top: 5px;
+}
+.app-caption:before {
+    content: "Рисунок " counter(appCounter) " – ";
+}
+body {
+    counter-reset: appCounter;
+}
+.app-container {
+    counter-increment: appCounter;
+}
+.app_table-caption {
+    display: block;
+    text-align: left;
+    margin-top: 5px;
+}
+.app_table-caption:before {
+    content: "Таблица " counter(apptableCounter) " – ";
+    letter-spacing: 2pt;
+}
+body {
+    counter-reset: apptableCounter ;
+}
+.app_table-caption {
+    counter-increment: apptableCounter;
+}

@@ -1,7 +1,6 @@
 import os
 import sys
 import subprocess
-from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -16,6 +15,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QGroupBox,
     QCheckBox,
+    QTabWidget,
     QListWidget,
     QListWidgetItem,
 )
@@ -23,6 +23,7 @@ from PyQt5.QtCore import Qt, QSettings, QTimer
 from PyQt5.QtGui import QIcon, QFont, QTextCursor
 from converter.converter_thread import EnhancedConverterThread
 from gui.preview_window import ModernPreviewWindow
+from pathlib import Path
 import pypandoc
 
 
@@ -32,9 +33,9 @@ class DocxToMarkdownConverter(QMainWindow):
         self.thread = None
         self.preview_window = None
         self.settings = QSettings("DOCX2MD", "EnhancedConverter")
-        self.project_root = Path(__file__).resolve().parents[2]
         self.init_ui()
         self.load_settings()
+        QTimer.singleShot(100, self.check_pandoc_installation)
 
     def init_ui(self):
         self.setWindowTitle("DOCX to Markdown Converter")
@@ -83,8 +84,12 @@ class DocxToMarkdownConverter(QMainWindow):
 
         output_layout = QHBoxLayout()
         output_layout.addWidget(self.output_path_edit)
-        output_layout.addWidget(self.browse_btn)
-        output_layout.addWidget(self.open_folder_btn)
+        output_layout.addWidget(
+            self.browse_btn
+        )  # Только один раз добавляем кнопку "Обзор"
+        output_layout.addWidget(
+            self.open_folder_btn
+        )  # Добавляем кнопку "Открыть папку"
         output_group.setLayout(output_layout)
 
         self.convert_btn = QPushButton("Начать конвертацию")
@@ -120,6 +125,17 @@ class DocxToMarkdownConverter(QMainWindow):
         self.file_list.itemDoubleClicked.connect(self.preview_file)
         self.open_folder_btn.clicked.connect(self.open_output_folder)
         self.output_path_edit.textChanged.connect(self.update_open_folder_btn_state)
+
+    def check_pandoc_installation(self):
+        try:
+            pypandoc.get_pandoc_version()
+        except OSError:
+            QMessageBox.critical(
+                self,
+                "Pandoc не найден",
+                "Для работы программы требуется Pandoc.\n\n"
+                "Установите его с официального сайта: https://pandoc.org/installing.html",
+            )
 
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -179,32 +195,23 @@ class DocxToMarkdownConverter(QMainWindow):
 
     def start_conversion(self):
         if self.file_list.count() == 0:
-            print("Нет файлов для конвертации")
             QMessageBox.warning(self, "Нет файлов", "Добавьте файлы для конвертации")
             return
 
-        output_path = self.output_path_edit.text().strip()
-        if not output_path:
-            print("Не указана папка для сохранения")
+        if not self.output_path_edit.text().strip():
             QMessageBox.warning(
                 self, "Не выбрана папка", "Укажите папку для сохранения результатов"
             )
             return
 
-        try:
-            output_path = Path(output_path).resolve()
-            if not output_path.exists():
-                output_path.mkdir(parents=True)
-                print(f"Создана папка: {output_path}")
-            elif not os.access(output_path, os.W_OK):
-                print(f"Нет прав на запись в папку: {output_path}")
-                raise PermissionError(f"Нет прав на запись в папку: {output_path}")
-        except Exception as e:
-            print(f"Ошибка доступа к папке: {str(e)}")
-            QMessageBox.critical(
-                self, "Ошибка", f"Не удалось создать/использовать папку:\n{str(e)}"
-            )
-            return
+        if not os.path.exists(self.output_path_edit.text()):
+            try:
+                os.makedirs(self.output_path_edit.text())
+            except OSError as e:
+                QMessageBox.critical(
+                    self, "Ошибка", f"Не удалось создать папку:\n{str(e)}"
+                )
+                return
 
         options = {
             "toc": self.toc_cb.isChecked(),
@@ -212,11 +219,14 @@ class DocxToMarkdownConverter(QMainWindow):
             "preserve_tabs": self.preserve_tabs_cb.isChecked(),
         }
 
+        # Получаем корень проекта (на 2 уровня выше от текущего файла)
+        project_root = Path(__file__).resolve().parents[2]
+
         self.thread = EnhancedConverterThread(
             [self.file_list.item(i).text() for i in range(self.file_list.count())],
             self.output_path_edit.text(),
             options,
-            self.project_root,
+            str(project_root),  # Добавляем project_root как строку
         )
 
         self.thread.progress_updated.connect(self.update_progress)
@@ -247,7 +257,6 @@ class DocxToMarkdownConverter(QMainWindow):
     def log_error(self, message):
         self.log.append(f"<font color='red'>{message}</font><br>")
         self.log.moveCursor(QTextCursor.End)
-        QMessageBox.critical(self, "Ошибка", message)
 
     def finalize_conversion(self, success_count):
         total = self.file_list.count()
@@ -302,27 +311,25 @@ class DocxToMarkdownConverter(QMainWindow):
         event.accept()
 
     def update_open_folder_btn_state(self):
+        """Активирует кнопку открытия папки только если путь существует"""
         path = self.output_path_edit.text()
         self.open_folder_btn.setEnabled(bool(path.strip() and os.path.isdir(path)))
 
     def open_output_folder(self):
+        """Открывает папку для сохранения в проводнике ОС"""
         path = self.output_path_edit.text()
-        if not path.strip():
-            print("Путь не указан")
-            return
-
-        try:
-            path = Path(path).resolve()
-            if path.is_dir():
-                if sys.platform == "win32":
-                    os.startfile(str(path))
-                    print(f"Открыта папка: {path}")
-                elif sys.platform == "darwin":
-                    subprocess.run(["open", str(path)], check=True)
-                    print(f"Открыта папка (macOS): {path}")
-                else:
-                    subprocess.run(["xdg-open", str(path)], check=True)
-                    print(f"Открыта папка (Linux): {path}")
-        except Exception as e:
-            print(f"Ошибка открытия папки: {str(e)}")
-            QMessageBox.warning(self, "Ошибка", f"Не удалось открыть папку:\n{str(e)}")
+        if os.path.isdir(path):
+            try:
+                if os.name == "nt":  # Для Windows
+                    os.startfile(path)
+                elif os.name == "posix":  # Для Linux/Mac
+                    if sys.platform == "darwin":
+                        subprocess.Popen(["open", path])
+                    else:
+                        subprocess.Popen(["xdg-open", path])
+            except Exception as e:
+                QMessageBox.warning(
+                    self, "Ошибка", f"Не удалось открыть папку:\n{str(e)}"
+                )
+        else:
+            QMessageBox.warning(self, "Ошибка", "Указанная папка не существует")
