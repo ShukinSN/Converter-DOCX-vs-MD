@@ -14,7 +14,7 @@
     margin-top: 5px;
 }
 .app-caption:before {
-    content: "Рисунок " counter(appCounter) " – ";
+    content: "Рисунок " var(--appLetter)"." counter(appCounter) " – ";
 }
 body {
     counter-reset: appCounter;
@@ -28,11 +28,11 @@ body {
     margin-top: 5px;
 }
 .app_table-caption:before {
-    content: "Таблица " counter(apptableCounter) " – ";
+    content: "Таблица " var(--appLetter)"." counter(apptableCounter) " – ";
     letter-spacing: 2pt;
 }
 body {
-    counter-reset: apptableCounter ;
+    counter-reset: apptableCounter;
 }
 .app_table-caption {
     counter-increment: apptableCounter;
