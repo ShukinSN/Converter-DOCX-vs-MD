@@ -35,6 +35,11 @@ class EnhancedConverterThread(QThread):
         total_files = len(self.files)
         success_count = 0
 
+        # Отладочный вывод для проверки appendix_letter
+        appendix_letter = self.options.get("appendix_letter", "А")
+        is_appendix = self.options.get("appendix", False)
+        print(f"Режим приложений: {is_appendix}, Буква приложения: {appendix_letter}")
+
         for i, input_path in enumerate(self.files):
             if not self._is_running:
                 break
@@ -45,14 +50,12 @@ class EnhancedConverterThread(QThread):
             )
 
             try:
-                # Получаем абсолютный путь и проверяем файл
                 input_path = Path(input_path).resolve()
                 if not input_path.exists():
                     raise FileNotFoundError(f"Файл не найден: {filename}")
                 if not os.access(input_path, os.R_OK):
                     raise PermissionError(f"Нет прав на чтение файла: {filename}")
 
-                # Проверяем папку для сохранения
                 output_folder = Path(self.output_folder).resolve()
                 if not output_folder.exists():
                     output_folder.mkdir(parents=True)
@@ -61,7 +64,9 @@ class EnhancedConverterThread(QThread):
                         f"Нет прав на запись в папку: {self.output_folder}"
                     )
 
-                # Проверяем что файл является валидным DOCX
+                output_images_dir = output_folder / "images"
+                output_images_dir.mkdir(exist_ok=True)
+
                 if not zipfile.is_zipfile(input_path):
                     raise ValueError(f"Неверный формат DOCX: {filename}")
 
@@ -83,7 +88,6 @@ class EnhancedConverterThread(QThread):
                     if self.options.get("preserve_tabs"):
                         extra_args.append("--preserve-tabs")
 
-                    # Конвертация с обработкой путей
                     try:
                         pypandoc.convert_file(
                             str(input_path),
@@ -100,9 +104,15 @@ class EnhancedConverterThread(QThread):
                         f"Конвертирован в Markdown: {filename}",
                     )
 
-                    # Обработка изображений
                     try:
-                        process_images(output_path, temp_dir, self.project_root)
+                        process_images(
+                            output_path,
+                            temp_dir,
+                            self.project_root,
+                            output_images_dir,
+                            is_appendix=self.options.get("appendix", False),
+                            appendix_letter=self.options.get("appendix_letter", "А"),
+                        )
                         self.progress_updated.emit(
                             int((i / total_files) * 80 + 15),
                             f"Обработаны изображения: {filename}",
@@ -110,9 +120,13 @@ class EnhancedConverterThread(QThread):
                     except Exception as e:
                         raise RuntimeError(f"Ошибка обработки изображений: {str(e)}")
 
-                    # Обработка таблиц
                     try:
-                        process_tables(output_path, self.project_root)
+                        process_tables(
+                            output_path,
+                            self.project_root,
+                            is_appendix=self.options.get("appendix", False),
+                            appendix_letter=self.options.get("appendix_letter", "А"),
+                        )
                         self.progress_updated.emit(
                             int((i / total_files) * 80 + 20),
                             f"Обработаны подписи таблиц: {filename}",
@@ -120,14 +134,29 @@ class EnhancedConverterThread(QThread):
                     except Exception as e:
                         raise RuntimeError(f"Ошибка обработки таблиц: {str(e)}")
 
-                    # Замена ссылок на изображения
                     replacement_rules = {}
                     media_dir = Path(temp_dir) / "media"
                     if media_dir.exists():
                         for f in media_dir.iterdir():
-                            if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif"):
+                            if f.suffix.lower() in (
+                                ".png",
+                                ".jpg",
+                                ".jpeg",
+                                ".gif",
+                                ".emf",
+                            ):
                                 old_path = f"media/{f.name}"
                                 new_path = f"images/{f.name}"
+                                dest_path = output_images_dir / f.name
+                                if f.suffix.lower() == ".emf":
+                                    png_path = convert_emf_to_png(f)
+                                    if png_path:
+                                        shutil.copy2(
+                                            png_path, output_images_dir / png_path.name
+                                        )
+                                        new_path = f"images/{png_path.name}"
+                                else:
+                                    shutil.copy2(f, dest_path)
                                 replacement_rules[old_path] = new_path
 
                     if replacement_rules:
@@ -140,7 +169,6 @@ class EnhancedConverterThread(QThread):
                         except Exception as e:
                             raise RuntimeError(f"Ошибка замены ссылок: {str(e)}")
 
-                    # Оглавление
                     if self.options.get("toc"):
                         try:
                             fix_links_and_toc(output_path)
@@ -153,16 +181,28 @@ class EnhancedConverterThread(QThread):
                                 f"Ошибка обработки оглавления ({filename}): {str(e)}"
                             )
 
-                    # Добавление стилей
                     with open(output_path, "r", encoding="utf-8-sig") as f:
                         content = f.read()
-                    has_images = '<div class="figure-container">' in content
-                    has_tables = '<div class="table-caption">' in content
+                    has_images = (
+                        '<div class="figure-container">' in content
+                        or '<div class="app-container">' in content
+                    )
+                    has_tables = (
+                        '<div class="table-caption">' in content
+                        or '<div class="app_table-caption">' in content
+                    )
 
                     if has_images or has_tables:
                         try:
                             append_or_update_styles(
-                                output_path, self.project_root, has_images, has_tables
+                                output_path,
+                                self.project_root,
+                                has_images,
+                                has_tables,
+                                is_appendix=self.options.get("appendix", False),
+                                appendix_letter=self.options.get(
+                                    "appendix_letter", "А"
+                                ),
                             )
                         except Exception as e:
                             self.error_occurred.emit(

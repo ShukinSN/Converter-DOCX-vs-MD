@@ -13,7 +13,7 @@ import markdown
 
 
 class ModernPreviewWindow(QMainWindow):
-    _cached_styles = None  # Кэш для CSS стилей
+    _cached_styles = None
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,32 +48,38 @@ class ModernPreviewWindow(QMainWindow):
         print("Интерфейс окна предпросмотра настроен")
 
     @classmethod
-    def get_styles(cls, project_root):
-        if cls._cached_styles is None:
-            styles = []
-            css_files = [
-                project_root / "src" / "css" / "styles_images.css",
-                project_root / "src" / "css" / "styles_tables.css",
-                project_root / "src" / "css" / "styles_appendices.css",
-            ]
+    def get_styles(cls, project_root, is_appendix=False, appendix_letter="А"):
+        styles = []
+        css_files = []
+        if is_appendix:
+            css_files.append(project_root / "src" / "css" / "styles_appendices.css")
+        else:
+            css_files.extend(
+                [
+                    project_root / "src" / "css" / "styles_images.css",
+                    project_root / "src" / "css" / "styles_tables.css",
+                ]
+            )
 
-            for css_path in css_files:
-                try:
-                    if css_path.exists():
-                        with open(css_path, "r", encoding="utf-8") as css_file:
-                            styles.append(css_file.read().strip())
-                        print(f"Загружен CSS из {css_path}")
-                    else:
-                        print(f"Файл CSS не найден: {css_path}")
-                except Exception as e:
-                    print(f"Ошибка при загрузке CSS из {css_path}: {str(e)}")
+        for css_path in css_files:
+            try:
+                if css_path.exists():
+                    with open(css_path, "r", encoding="utf-8") as css_file:
+                        css_content = css_file.read().strip()
+                        if is_appendix:
+                            css_content = css_content.replace(
+                                "var(--appLetter)", f'"{appendix_letter}"'
+                            )
+                        styles.append(css_content)
+                    print(f"Загружен CSS из {css_path}")
+                else:
+                    print(f"Файл CSS не найден: {css_path}")
+            except Exception as e:
+                print(f"Ошибка при загрузке CSS из {css_path}: {str(e)}")
 
-            cls._cached_styles = "\n".join(styles) if styles else ""
-            print("CSS стили закэшированы")
+        return "\n".join(styles) if styles else ""
 
-        return cls._cached_styles
-
-    def set_content(self, content):
+    def set_content(self, content, is_appendix=False, appendix_letter="А"):
         try:
             self.markdown_view.setPlainText(content)
             print("Markdown контент установлен")
@@ -81,7 +87,9 @@ class ModernPreviewWindow(QMainWindow):
             html = markdown.markdown(content, extensions=["fenced_code", "codehilite"])
             print("Конвертация Markdown в HTML выполнена")
 
-            combined_styles = self.get_styles(self.project_root)
+            combined_styles = self.get_styles(
+                self.project_root, is_appendix, appendix_letter
+            )
             html = f"<style>\n{combined_styles}\n</style>\n{html}"
 
             self.html_view.setHtml(html)

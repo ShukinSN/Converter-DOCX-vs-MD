@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import tempfile
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -69,11 +70,28 @@ class DocxToMarkdownConverter(QMainWindow):
         self.toc_cb = QCheckBox("Генерировать оглавление")
         self.overwrite_cb = QCheckBox("Перезаписывать существующие файлы")
         self.preserve_tabs_cb = QCheckBox("Сохранять табуляцию")
+        self.appendix_cb = QCheckBox("Приложение")
+        self.appendix_letter_label = QLabel("Буква приложения:")
+        self.appendix_letter_edit = QLineEdit()
+        self.appendix_letter_edit.setMaxLength(
+            2
+        )  # Ограничение на длину (например, А или АБ)
+        self.appendix_letter_edit.setFixedWidth(50)
+        self.appendix_letter_edit.setEnabled(False)  # По умолчанию отключено
+
+        # Активируем поле ввода буквы при включении чекбокса
+        self.appendix_cb.stateChanged.connect(self.toggle_appendix_letter)
 
         settings_layout = QVBoxLayout()
         settings_layout.addWidget(self.toc_cb)
         settings_layout.addWidget(self.overwrite_cb)
         settings_layout.addWidget(self.preserve_tabs_cb)
+        settings_layout.addWidget(self.appendix_cb)
+        appendix_letter_layout = QHBoxLayout()
+        appendix_letter_layout.addWidget(self.appendix_letter_label)
+        appendix_letter_layout.addWidget(self.appendix_letter_edit)
+        appendix_letter_layout.addStretch()
+        settings_layout.addLayout(appendix_letter_layout)
         settings_group.setLayout(settings_layout)
 
         output_group = QGroupBox("Папка для сохранения")
@@ -84,12 +102,8 @@ class DocxToMarkdownConverter(QMainWindow):
 
         output_layout = QHBoxLayout()
         output_layout.addWidget(self.output_path_edit)
-        output_layout.addWidget(
-            self.browse_btn
-        )  # Только один раз добавляем кнопку "Обзор"
-        output_layout.addWidget(
-            self.open_folder_btn
-        )  # Добавляем кнопку "Открыть папку"
+        output_layout.addWidget(self.browse_btn)
+        output_layout.addWidget(self.open_folder_btn)
         output_group.setLayout(output_layout)
 
         self.convert_btn = QPushButton("Начать конвертацию")
@@ -126,6 +140,10 @@ class DocxToMarkdownConverter(QMainWindow):
         self.open_folder_btn.clicked.connect(self.open_output_folder)
         self.output_path_edit.textChanged.connect(self.update_open_folder_btn_state)
 
+    def toggle_appendix_letter(self, state):
+        """Активирует/деактивирует поле ввода буквы приложения."""
+        self.appendix_letter_edit.setEnabled(state == Qt.Checked)
+
     def check_pandoc_installation(self):
         try:
             pypandoc.get_pandoc_version()
@@ -134,38 +152,22 @@ class DocxToMarkdownConverter(QMainWindow):
                 self,
                 "Pandoc не найден",
                 "Для работы программы требуется Pandoc.\n\n"
-                "Установите его с официального сайта: https://pandoc.org/installing.html",
+                "Пожалуйста, установите Pandoc с https://pandoc.org/installing.html",
             )
 
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Выберите DOCX файлы", "", "Документы Word (*.docx);;Все файлы (*)"
+            self, "Выбрать DOCX файлы", "", "DOCX Files (*.docx)"
         )
-
-        if files:
-            existing = {
-                self.file_list.item(i).text() for i in range(self.file_list.count())
-            }
-            for f in files:
-                if f not in existing:
-                    item = QListWidgetItem(f)
-                    item.setToolTip(f)
-                    self.file_list.addItem(item)
+        for file in files:
+            self.file_list.addItem(QListWidgetItem(file))
 
     def add_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Выберите папку с документами")
+        folder = QFileDialog.getExistingDirectory(self, "Выбрать папку")
         if folder:
-            existing = {
-                self.file_list.item(i).text() for i in range(self.file_list.count())
-            }
-            for root, _, files in os.walk(folder):
-                for f in files:
-                    if f.lower().endswith(".docx"):
-                        path = os.path.join(root, f)
-                        if path not in existing:
-                            item = QListWidgetItem(path)
-                            item.setToolTip(path)
-                            self.file_list.addItem(item)
+            for file in os.listdir(folder):
+                if file.endswith(".docx"):
+                    self.file_list.addItem(QListWidgetItem(os.path.join(folder, file)))
 
     def remove_selected(self):
         for item in self.file_list.selectedItems():
@@ -175,21 +177,34 @@ class DocxToMarkdownConverter(QMainWindow):
         self.file_list.clear()
 
     def select_output(self):
-        path = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения")
-        if path:
-            self.output_path_edit.setText(path)
+        folder = QFileDialog.getExistingDirectory(self, "Выбрать папку для сохранения")
+        if folder:
+            self.output_path_edit.setText(folder)
 
     def preview_file(self, item):
-        if self.preview_window is None or not self.preview_window.isVisible():
-            self.preview_window = ModernPreviewWindow(self)
         try:
-            content = pypandoc.convert_file(
-                item.text(), "markdown", format="docx", extra_args=["--wrap=none"]
-            )
-            self.preview_window.set_content(content)
-            self.preview_window.show()
+            input_path = item.text()
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_md = os.path.join(temp_dir, "preview.md")
+                pypandoc.convert_file(
+                    input_path,
+                    "markdown",
+                    outputfile=temp_md,
+                    format="docx",
+                    extra_args=["--wrap=none", "--to=gfm"],
+                )
+                with open(temp_md, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if not self.preview_window or not self.preview_window.isVisible():
+                    self.preview_window = ModernPreviewWindow(self)
+                self.preview_window.set_content(
+                    content,
+                    is_appendix=self.appendix_cb.isChecked(),
+                    appendix_letter=self.appendix_letter_edit.text().strip() or "А",
+                )
+                self.preview_window.show()
         except Exception as e:
-            QMessageBox.warning(
+            QMessageBox.critical(
                 self, "Ошибка предпросмотра", f"Не удалось открыть файл:\n{str(e)}"
             )
 
@@ -213,20 +228,37 @@ class DocxToMarkdownConverter(QMainWindow):
                 )
                 return
 
+        # Показ диалога подтверждения, если включён режим приложения
+        if self.appendix_cb.isChecked():
+            reply = QMessageBox.question(
+                self,
+                "Режим приложения",
+                "Включён режим Приложение. Продолжить конвертацию?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+
+            if reply != QMessageBox.Yes:
+                self.log.append(
+                    "<font color='orange'>Конвертация отменена пользователем</font><br>"
+                )
+                return
+
         options = {
             "toc": self.toc_cb.isChecked(),
             "overwrite": self.overwrite_cb.isChecked(),
             "preserve_tabs": self.preserve_tabs_cb.isChecked(),
+            "appendix": self.appendix_cb.isChecked(),
+            "appendix_letter": self.appendix_letter_edit.text().strip() or "А",
         }
 
-        # Получаем корень проекта (на 2 уровня выше от текущего файла)
         project_root = Path(__file__).resolve().parents[2]
 
         self.thread = EnhancedConverterThread(
             [self.file_list.item(i).text() for i in range(self.file_list.count())],
             self.output_path_edit.text(),
             options,
-            str(project_root),  # Добавляем project_root как строку
+            str(project_root),
         )
 
         self.thread.progress_updated.connect(self.update_progress)
@@ -294,12 +326,16 @@ class DocxToMarkdownConverter(QMainWindow):
         self.preserve_tabs_cb.setChecked(
             self.settings.value("preserve_tabs", False, type=bool)
         )
+        self.appendix_cb.setChecked(self.settings.value("appendix", False, type=bool))
+        self.appendix_letter_edit.setText(self.settings.value("appendix_letter", "А"))
 
     def save_settings(self):
         self.settings.setValue("output_path", self.output_path_edit.text())
         self.settings.setValue("toc", self.toc_cb.isChecked())
         self.settings.setValue("overwrite", self.overwrite_cb.isChecked())
         self.settings.setValue("preserve_tabs", self.preserve_tabs_cb.isChecked())
+        self.settings.setValue("appendix", self.appendix_cb.isChecked())
+        self.settings.setValue("appendix_letter", self.appendix_letter_edit.text())
 
     def closeEvent(self, event):
         self.save_settings()
@@ -311,18 +347,16 @@ class DocxToMarkdownConverter(QMainWindow):
         event.accept()
 
     def update_open_folder_btn_state(self):
-        """Активирует кнопку открытия папки только если путь существует"""
         path = self.output_path_edit.text()
         self.open_folder_btn.setEnabled(bool(path.strip() and os.path.isdir(path)))
 
     def open_output_folder(self):
-        """Открывает папку для сохранения в проводнике ОС"""
         path = self.output_path_edit.text()
         if os.path.isdir(path):
             try:
-                if os.name == "nt":  # Для Windows
+                if os.name == "nt":
                     os.startfile(path)
-                elif os.name == "posix":  # Для Linux/Mac
+                elif os.name == "posix":
                     if sys.platform == "darwin":
                         subprocess.Popen(["open", path])
                     else:
