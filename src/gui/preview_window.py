@@ -10,6 +10,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from pathlib import Path
 import markdown
+import sys
 
 
 class ModernPreviewWindow(QMainWindow):
@@ -51,13 +52,17 @@ class ModernPreviewWindow(QMainWindow):
     def get_styles(cls, project_root, is_appendix=False, appendix_letter="А"):
         styles = []
         css_files = []
+
+        # Определяем базовый путь - для EXE или исходного кода
+        base_path = Path(getattr(sys, "_MEIPASS", project_root))
+
         if is_appendix:
-            css_files.append(project_root / "src" / "css" / "styles_appendices.css")
+            css_files.append(base_path / "src" / "css" / "styles_appendices.css")
         else:
             css_files.extend(
                 [
-                    project_root / "src" / "css" / "styles_images.css",
-                    project_root / "src" / "css" / "styles_tables.css",
+                    base_path / "src" / "css" / "styles_images.css",
+                    base_path / "src" / "css" / "styles_tables.css",
                 ]
             )
 
