@@ -113,7 +113,7 @@ def process_images(
         # Пропускаем строки с подписями к рисункам
         if not in_table:
             if is_appendix and re.match(
-                r"^(?:Рисунок|Рис\.?)\s*[А-Яа-я]\.\d+\s*[-–—]\s*(.*)$",
+                r"^(?:Рисунок|Рис\.?)\s*(?:[А-Яа-я]\.\d+|[А-Яа-я]\.|\.)\s*[-–—]\s*(.*)$",
                 stripped_line,
                 re.IGNORECASE,
             ):
@@ -146,13 +146,13 @@ def process_images(
                     rel_path = process_image_match(img_match, is_markdown)
                     if rel_path:
                         caption = "Изображение"
-                        for j in range(1, 4):
+                        for j in range(1, 6):
                             if i + j >= len(lines):
                                 break
                             next_line = lines[i + j].strip()
                             if is_appendix:
                                 caption_match = re.match(
-                                    r"^(?:Рисунок|Рис\.?)\s*[А-Яа-я]\.\d+\s*[-–—]\s*(.*)$",
+                                    r"^(?:Рисунок|Рис\.?)\s*(?:[А-Яа-я]\.\d+|[А-Яа-я]\.|\.)\s*[-–—]\s*(.*)$",
                                     next_line,
                                     re.IGNORECASE,
                                 )

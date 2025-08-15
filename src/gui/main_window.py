@@ -46,6 +46,7 @@ class DocxToMarkdownConverter(QMainWindow):
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
 
+        # Группа документов для конвертации
         file_group = QGroupBox("Документы для конвертации")
         self.file_list = QListWidget()
         self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
@@ -66,6 +67,7 @@ class DocxToMarkdownConverter(QMainWindow):
         file_group_layout.addLayout(btn_layout)
         file_group.setLayout(file_group_layout)
 
+        # Группа настроек конвертации
         settings_group = QGroupBox("Настройки конвертации")
         self.toc_cb = QCheckBox("Генерировать оглавление")
         self.overwrite_cb = QCheckBox("Перезаписывать существующие файлы")
@@ -73,20 +75,20 @@ class DocxToMarkdownConverter(QMainWindow):
         self.appendix_cb = QCheckBox("Приложение")
         self.appendix_letter_label = QLabel("Буква приложения:")
         self.appendix_letter_edit = QLineEdit()
-        self.appendix_letter_edit.setMaxLength(
-            2
-        )  # Ограничение на длину (например, А или АБ)
+        self.appendix_letter_edit.setMaxLength(2)
         self.appendix_letter_edit.setFixedWidth(50)
-        self.appendix_letter_edit.setEnabled(False)  # По умолчанию отключено
+        self.appendix_letter_edit.setEnabled(False)
 
-        # Активируем поле ввода буквы при включении чекбокса
+        # Подключаем обработчики для чекбокса "Приложение"
         self.appendix_cb.stateChanged.connect(self.toggle_appendix_letter)
+        self.appendix_cb.stateChanged.connect(self.handle_appendix_toggle)
 
         settings_layout = QVBoxLayout()
         settings_layout.addWidget(self.toc_cb)
         settings_layout.addWidget(self.overwrite_cb)
         settings_layout.addWidget(self.preserve_tabs_cb)
         settings_layout.addWidget(self.appendix_cb)
+
         appendix_letter_layout = QHBoxLayout()
         appendix_letter_layout.addWidget(self.appendix_letter_label)
         appendix_letter_layout.addWidget(self.appendix_letter_edit)
@@ -94,6 +96,7 @@ class DocxToMarkdownConverter(QMainWindow):
         settings_layout.addLayout(appendix_letter_layout)
         settings_group.setLayout(settings_layout)
 
+        # Группа папки для сохранения
         output_group = QGroupBox("Папка для сохранения")
         self.output_path_edit = QLineEdit()
         self.browse_btn = QPushButton("Обзор...")
@@ -106,6 +109,7 @@ class DocxToMarkdownConverter(QMainWindow):
         output_layout.addWidget(self.open_folder_btn)
         output_group.setLayout(output_layout)
 
+        # Кнопки управления и прогресс
         self.convert_btn = QPushButton("Начать конвертацию")
         self.cancel_btn = QPushButton("Отмена")
         self.cancel_btn.setEnabled(False)
@@ -113,10 +117,12 @@ class DocxToMarkdownConverter(QMainWindow):
         self.progress = QProgressBar()
         self.progress.setAlignment(Qt.AlignCenter)
 
+        # Лог конвертации
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setFont(QFont("Consolas", 9))
 
+        # Компоновка элементов
         layout.addWidget(file_group)
         layout.addWidget(settings_group)
         layout.addWidget(output_group)
@@ -129,6 +135,7 @@ class DocxToMarkdownConverter(QMainWindow):
         layout.addWidget(self.progress)
         layout.addWidget(self.log)
 
+        # Подключаем обработчики событий
         self.add_files_btn.clicked.connect(self.add_files)
         self.add_folder_btn.clicked.connect(self.add_folder)
         self.remove_btn.clicked.connect(self.remove_selected)
@@ -139,6 +146,32 @@ class DocxToMarkdownConverter(QMainWindow):
         self.file_list.itemDoubleClicked.connect(self.preview_file)
         self.open_folder_btn.clicked.connect(self.open_output_folder)
         self.output_path_edit.textChanged.connect(self.update_open_folder_btn_state)
+
+    def handle_appendix_toggle(self, state):
+        """Обрабатывает переключение чекбокса Приложение"""
+        if state == Qt.Checked:
+            # Показываем подтверждение только если есть документы в списке
+            if self.file_list.count() > 0:
+                reply = QMessageBox.question(
+                    self,
+                    "Режим приложения",
+                    "Включение режима Приложение очистит список документов. Продолжить?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+
+                if reply == QMessageBox.Yes:
+                    self.clear_list()  # Очищаем список
+                    self.appendix_letter_edit.setEnabled(True)
+                else:
+                    # Если пользователь отказался, возвращаем чекбокс в выключенное состояние
+                    self.appendix_cb.setChecked(False)
+                    return
+            else:
+                # Если список пуст, просто активируем поле ввода
+                self.appendix_letter_edit.setEnabled(True)
+        else:
+            self.appendix_letter_edit.setEnabled(False)
 
     def toggle_appendix_letter(self, state):
         """Активирует/деактивирует поле ввода буквы приложения."""
@@ -177,18 +210,13 @@ class DocxToMarkdownConverter(QMainWindow):
         self.file_list.clear()
 
     def select_output(self):
-        # Получаем последний использованный путь из настроек или используем домашнюю директорию
         last_path = self.settings.value("last_browse_path", os.path.expanduser("~"))
-
         folder = QFileDialog.getExistingDirectory(
-            self,
-            "Выбрать папку для сохранения",
-            last_path,  # Указываем начальный путь для диалога
+            self, "Выбрать папку для сохранения", last_path
         )
 
         if folder:
             self.output_path_edit.setText(folder)
-            # Сохраняем выбранный путь как последний использованный
             self.settings.setValue("last_browse_path", folder)
             self.update_open_folder_btn_state()
 
@@ -206,8 +234,10 @@ class DocxToMarkdownConverter(QMainWindow):
                 )
                 with open(temp_md, "r", encoding="utf-8") as f:
                     content = f.read()
+
                 if not self.preview_window or not self.preview_window.isVisible():
                     self.preview_window = ModernPreviewWindow(self)
+
                 self.preview_window.set_content(
                     content,
                     is_appendix=self.appendix_cb.isChecked(),
@@ -239,7 +269,7 @@ class DocxToMarkdownConverter(QMainWindow):
                 )
                 return
 
-        # Показ диалога подтверждения, если включён режим приложения
+        # Показ диалога подтверждения для режима приложения
         if self.appendix_cb.isChecked():
             reply = QMessageBox.question(
                 self,
@@ -339,7 +369,6 @@ class DocxToMarkdownConverter(QMainWindow):
         )
         self.appendix_cb.setChecked(self.settings.value("appendix", False, type=bool))
         self.appendix_letter_edit.setText(self.settings.value("appendix_letter", "А"))
-        # Обновляем состояние кнопки при загрузке настроек
         self.update_open_folder_btn_state()
 
     def save_settings(self):
@@ -349,7 +378,7 @@ class DocxToMarkdownConverter(QMainWindow):
         self.settings.setValue("preserve_tabs", self.preserve_tabs_cb.isChecked())
         self.settings.setValue("appendix", self.appendix_cb.isChecked())
         self.settings.setValue("appendix_letter", self.appendix_letter_edit.text())
-        # Сохраняем текущий путь как последний использованный
+
         if self.output_path_edit.text():
             self.settings.setValue("last_browse_path", self.output_path_edit.text())
 
