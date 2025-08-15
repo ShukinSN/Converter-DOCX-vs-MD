@@ -177,9 +177,20 @@ class DocxToMarkdownConverter(QMainWindow):
         self.file_list.clear()
 
     def select_output(self):
-        folder = QFileDialog.getExistingDirectory(self, "Выбрать папку для сохранения")
+        # Получаем последний использованный путь из настроек или используем домашнюю директорию
+        last_path = self.settings.value("last_browse_path", os.path.expanduser("~"))
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Выбрать папку для сохранения",
+            last_path,  # Указываем начальный путь для диалога
+        )
+
         if folder:
             self.output_path_edit.setText(folder)
+            # Сохраняем выбранный путь как последний использованный
+            self.settings.setValue("last_browse_path", folder)
+            self.update_open_folder_btn_state()
 
     def preview_file(self, item):
         try:
@@ -328,6 +339,8 @@ class DocxToMarkdownConverter(QMainWindow):
         )
         self.appendix_cb.setChecked(self.settings.value("appendix", False, type=bool))
         self.appendix_letter_edit.setText(self.settings.value("appendix_letter", "А"))
+        # Обновляем состояние кнопки при загрузке настроек
+        self.update_open_folder_btn_state()
 
     def save_settings(self):
         self.settings.setValue("output_path", self.output_path_edit.text())
@@ -336,6 +349,9 @@ class DocxToMarkdownConverter(QMainWindow):
         self.settings.setValue("preserve_tabs", self.preserve_tabs_cb.isChecked())
         self.settings.setValue("appendix", self.appendix_cb.isChecked())
         self.settings.setValue("appendix_letter", self.appendix_letter_edit.text())
+        # Сохраняем текущий путь как последний использованный
+        if self.output_path_edit.text():
+            self.settings.setValue("last_browse_path", self.output_path_edit.text())
 
     def closeEvent(self, event):
         self.save_settings()

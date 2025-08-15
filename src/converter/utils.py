@@ -410,15 +410,38 @@ def append_or_update_styles(
 
     if styles:
         combined_styles = "\n".join(styles)
-        if style_marker not in content:
-            content += f"\n\n{style_marker}\n<style>\n{combined_styles}\n</style>"
-        else:
+
+        if is_appendix:
+            # Для приложений добавляем data-атрибут с буквой приложения
+            style_tag = f'<style data-appendix="{appendix_letter}">\n{combined_styles}\n</style>'
+
+            # Удаляем старые стили этого приложения, если они есть
             content = re.sub(
-                r"(<!-- DOCX2MD STYLES -->\n<style>)(.*?)(</style>)",
-                f"\\1\n{combined_styles}\n\\3",
+                rf'<style data-appendix="{appendix_letter}">.*?</style>',
+                "",
                 content,
                 flags=re.DOTALL,
             )
+        else:
+            style_tag = f"<style>\n{combined_styles}\n</style>"
+            # Удаляем только общие стили, если они есть
+            if style_marker in content:
+                content = re.sub(
+                    r"(<!-- DOCX2MD STYLES -->\s*)<style>.*?</style>",
+                    "",
+                    content,
+                    flags=re.DOTALL,
+                )
+
+        if is_appendix:
+            # Для приложений добавляем без маркера
+            content += f"\n\n{style_tag}"
+        else:
+            # Для обычных стилей добавляем с маркером
+            if style_marker not in content:
+                content += f"\n\n{style_marker}\n{style_tag}"
+            else:
+                content = content.replace(style_marker, f"{style_marker}\n{style_tag}")
 
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(content)
