@@ -19,6 +19,10 @@ from PyQt5.QtWidgets import (
     QTabWidget,
     QListWidget,
     QListWidgetItem,
+    QAction,
+    QActionGroup,
+    QMenu,
+    QApplication,
 )
 from PyQt5.QtCore import Qt, QSettings, QTimer
 from PyQt5.QtGui import QIcon, QFont, QTextCursor
@@ -42,11 +46,32 @@ class DocxToMarkdownConverter(QMainWindow):
         self.setWindowTitle("DOCX to Markdown Converter")
         self.setGeometry(100, 100, 900, 700)
 
+        # Создаем меню
+        menubar = self.menuBar()
+        theme_menu = menubar.addMenu("Тема")
+
+        # Действия для тем
+        self.dark_theme_action = QAction("Тёмная тема", self)
+        self.dark_theme_action.setCheckable(True)
+        self.dark_theme_action.triggered.connect(lambda: self.change_theme("dark"))
+
+        self.light_theme_action = QAction("Светлая тема", self)
+        self.light_theme_action.setCheckable(True)
+        self.light_theme_action.triggered.connect(lambda: self.change_theme("light"))
+
+        # Группа действий для эксклюзивного выбора
+        theme_group = QActionGroup(self)
+        theme_group.addAction(self.dark_theme_action)
+        theme_group.addAction(self.light_theme_action)
+        theme_group.setExclusive(True)
+
+        theme_menu.addAction(self.dark_theme_action)
+        theme_menu.addAction(self.light_theme_action)
+
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
 
-        # Группа документов для конвертации
         file_group = QGroupBox("Документы для конвертации")
         self.file_list = QListWidget()
         self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
@@ -67,7 +92,6 @@ class DocxToMarkdownConverter(QMainWindow):
         file_group_layout.addLayout(btn_layout)
         file_group.setLayout(file_group_layout)
 
-        # Группа настроек конвертации
         settings_group = QGroupBox("Настройки конвертации")
         self.toc_cb = QCheckBox("Генерировать оглавление")
         self.overwrite_cb = QCheckBox("Перезаписывать существующие файлы")
@@ -96,7 +120,6 @@ class DocxToMarkdownConverter(QMainWindow):
         settings_layout.addLayout(appendix_letter_layout)
         settings_group.setLayout(settings_layout)
 
-        # Группа папки для сохранения
         output_group = QGroupBox("Папка для сохранения")
         self.output_path_edit = QLineEdit()
         self.browse_btn = QPushButton("Обзор...")
@@ -109,7 +132,6 @@ class DocxToMarkdownConverter(QMainWindow):
         output_layout.addWidget(self.open_folder_btn)
         output_group.setLayout(output_layout)
 
-        # Кнопки управления и прогресс
         self.convert_btn = QPushButton("Начать конвертацию")
         self.cancel_btn = QPushButton("Отмена")
         self.cancel_btn.setEnabled(False)
@@ -117,12 +139,10 @@ class DocxToMarkdownConverter(QMainWindow):
         self.progress = QProgressBar()
         self.progress.setAlignment(Qt.AlignCenter)
 
-        # Лог конвертации
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setFont(QFont("Consolas", 9))
 
-        # Компоновка элементов
         layout.addWidget(file_group)
         layout.addWidget(settings_group)
         layout.addWidget(output_group)
@@ -135,7 +155,6 @@ class DocxToMarkdownConverter(QMainWindow):
         layout.addWidget(self.progress)
         layout.addWidget(self.log)
 
-        # Подключаем обработчики событий
         self.add_files_btn.clicked.connect(self.add_files)
         self.add_folder_btn.clicked.connect(self.add_folder)
         self.remove_btn.clicked.connect(self.remove_selected)
@@ -146,6 +165,23 @@ class DocxToMarkdownConverter(QMainWindow):
         self.file_list.itemDoubleClicked.connect(self.preview_file)
         self.open_folder_btn.clicked.connect(self.open_output_folder)
         self.output_path_edit.textChanged.connect(self.update_open_folder_btn_state)
+
+    def change_theme(self, theme_name):
+        """Изменяет тему приложения"""
+        app = QApplication.instance()
+
+        if theme_name == "dark":
+            from gui.palette import DarkPalette
+
+            DarkPalette.apply(app)
+            self.dark_theme_action.setChecked(True)
+            self.settings.setValue("theme", "dark")
+        else:
+            from gui.palette import LightPalette
+
+            LightPalette.apply(app)
+            self.light_theme_action.setChecked(True)
+            self.settings.setValue("theme", "light")
 
     def handle_appendix_toggle(self, state):
         """Обрабатывает переключение чекбокса Приложение"""
@@ -369,6 +405,14 @@ class DocxToMarkdownConverter(QMainWindow):
         )
         self.appendix_cb.setChecked(self.settings.value("appendix", False, type=bool))
         self.appendix_letter_edit.setText(self.settings.value("appendix_letter", "А"))
+
+        # Загрузка темы
+        theme = self.settings.value("theme", "dark")
+        if theme == "light":
+            self.change_theme("light")
+        else:
+            self.change_theme("dark")
+
         self.update_open_folder_btn_state()
 
     def save_settings(self):
@@ -378,6 +422,7 @@ class DocxToMarkdownConverter(QMainWindow):
         self.settings.setValue("preserve_tabs", self.preserve_tabs_cb.isChecked())
         self.settings.setValue("appendix", self.appendix_cb.isChecked())
         self.settings.setValue("appendix_letter", self.appendix_letter_edit.text())
+        self.settings.setValue("theme", self.settings.value("theme", "dark"))
 
         if self.output_path_edit.text():
             self.settings.setValue("last_browse_path", self.output_path_edit.text())

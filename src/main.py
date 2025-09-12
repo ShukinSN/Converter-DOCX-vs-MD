@@ -3,7 +3,8 @@
 import os
 import sys
 from PyQt5.QtWidgets import QApplication
-from gui.palette import DarkPalette
+from PyQt5.QtCore import QSettings
+from gui.palette import DarkPalette, LightPalette
 from gui.main_window import DocxToMarkdownConverter
 from dependencies.checker import DependencyChecker
 
@@ -14,7 +15,15 @@ def main():
             return 1
 
         app = QApplication(sys.argv)
-        DarkPalette.apply(app)
+
+        # Загружаем настройки темы
+        settings = QSettings("DOCX2MD", "EnhancedConverter")
+        theme = settings.value("theme", "dark")
+
+        if theme == "light":
+            LightPalette.apply(app)
+        else:
+            DarkPalette.apply(app)
 
         converter = DocxToMarkdownConverter()
         converter.show()
