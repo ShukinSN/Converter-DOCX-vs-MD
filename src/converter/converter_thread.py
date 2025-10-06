@@ -30,6 +30,7 @@ class EnhancedConverterThread(QThread):
         self.options = options
         self.project_root = Path(project_root)
         self._is_running = True
+        self.successful_files = []  # Новое: список путей успешных MD-файлов
 
     def run(self):
         total_files = len(self.files)
@@ -213,6 +214,9 @@ class EnhancedConverterThread(QThread):
                     self.conversion_finished.emit(
                         filename, f"Успешно: {safe_name}.md", str(output_path)
                     )
+                    self.successful_files.append(
+                        str(output_path)
+                    )  # Новое: добавляем путь
 
             except Exception as e:
                 error_msg = f"Ошибка ({filename}): {str(e)}"
