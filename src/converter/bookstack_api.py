@@ -134,7 +134,7 @@ def create_page_from_md(base_url, headers, book_id, md_path):
             md_content = f.read()
 
         html_content = markdown.markdown(
-            md_content, extensions=["fenced_code", "tables", "toc", "codehilite"]
+            md_content, extensions=["fenced_code", "tables", "codehilite"]
         )
 
         page_name = f"Содержимое {Path(md_path).stem}"
