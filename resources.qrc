@@ -1,0 +1,6 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file alias="refresh.png">src/refresh.png</file>  <!-- Путь к вашей иконке в src/ -->
+    </qresource>
+</RCC>

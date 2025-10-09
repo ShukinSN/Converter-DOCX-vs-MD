@@ -18,6 +18,8 @@ from PyQt5.QtCore import Qt, QSize  # Для флагов выравнивани
 from PyQt5.QtGui import QIcon  # Для работы с иконками
 from pathlib import Path  # Для работы с путями к файлам
 
+import resources_rc
+
 # Импорты из модуля API для взаимодействия с BookStack
 from converter.bookstack_api import (
     get_shelves,  # Получить список полок
@@ -109,7 +111,7 @@ class BookStackWidget(QWidget):
             self.refresh_books
         )  # Сигнал для обновления книг
         self.refresh_shelves_btn = QPushButton()
-        refresh_icon = QIcon("src/resources/refresh.png")
+        refresh_icon = QIcon(":/icons/refresh.png")
         self.refresh_shelves_btn.setIcon(refresh_icon)
         self.refresh_shelves_btn.setIconSize(QSize(24, 24))
         self.refresh_shelves_btn.clicked.connect(self.refresh_shelves)

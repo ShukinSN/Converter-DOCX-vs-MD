@@ -1,26 +1,18 @@
-from PyQt5.QtWidgets import (
-    QMainWindow,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-    QPushButton,
-    QTabWidget,
-)
+from PyQt5.QtWidgets import QMainWindow, QTextEdit, QSplitter, QWidget, QVBoxLayout
+from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
 from pathlib import Path
-import markdown
 import sys
+import markdown
 
 
 class ModernPreviewWindow(QMainWindow):
-    _cached_styles = None
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Предпросмотр Markdown")
         self.setGeometry(200, 200, 800, 600)
         self.project_root = Path(__file__).resolve().parents[2]
+        print(f"Project root: {self.project_root}")
         self.init_ui()
         print("Инициализировано окно предпросмотра")
 
@@ -29,32 +21,21 @@ class ModernPreviewWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        self.tab_widget = QTabWidget()
+        splitter = QSplitter(Qt.Horizontal)
         self.markdown_view = QTextEdit()
         self.markdown_view.setReadOnly(True)
-        self.markdown_view.setFont(QFont("Consolas", 10))
-        self.html_view = QTextEdit()
-        self.html_view.setReadOnly(True)
-        self.html_view.setFont(QFont("Consolas", 10))
-
-        self.tab_widget.addTab(self.markdown_view, "Markdown")
-        self.tab_widget.addTab(self.html_view, "HTML")
-        print("Созданы вкладки предпросмотра")
-
-        self.close_button = QPushButton("Закрыть")
-        self.close_button.clicked.connect(self.close)
-
-        layout.addWidget(self.tab_widget)
-        layout.addWidget(self.close_button)
-        print("Интерфейс окна предпросмотра настроен")
+        self.html_view = QWebEngineView()
+        splitter.addWidget(self.markdown_view)
+        splitter.addWidget(self.html_view)
+        splitter.setSizes([400, 400])
+        layout.addWidget(splitter)
 
     @classmethod
     def get_styles(cls, project_root, is_appendix=False, appendix_letter="А"):
         styles = []
         css_files = []
-
-        # Определяем базовый путь - для EXE или исходного кода
         base_path = Path(getattr(sys, "_MEIPASS", project_root))
+        print(f"Base path for CSS: {base_path}")
 
         if is_appendix:
             css_files.append(base_path / "src" / "css" / "styles_appendices.css")
@@ -67,6 +48,7 @@ class ModernPreviewWindow(QMainWindow):
             )
 
         for css_path in css_files:
+            print(f"Checking CSS: {css_path}, exists: {css_path.exists()}")
             try:
                 if css_path.exists():
                     with open(css_path, "r", encoding="utf-8") as css_file:
@@ -76,11 +58,11 @@ class ModernPreviewWindow(QMainWindow):
                                 "var(--appLetter)", f'"{appendix_letter}"'
                             )
                         styles.append(css_content)
-                    print(f"Загружен CSS из {css_path}")
+                    print(f"Loaded CSS from {css_path}")
                 else:
-                    print(f"Файл CSS не найден: {css_path}")
+                    print(f"CSS file not found: {css_path}")
             except Exception as e:
-                print(f"Ошибка при загрузке CSS из {css_path}: {str(e)}")
+                print(f"Error loading CSS from {css_path}: {str(e)}")
 
         return "\n".join(styles) if styles else ""
 
@@ -95,11 +77,11 @@ class ModernPreviewWindow(QMainWindow):
             combined_styles = self.get_styles(
                 self.project_root, is_appendix, appendix_letter
             )
+            print(f"Combined styles: {combined_styles[:100]}...")
             html = f"<style>\n{combined_styles}\n</style>\n{html}"
 
             self.html_view.setHtml(html)
             print("HTML контент отображен")
-
         except Exception as e:
             error_msg = f"Ошибка конвертации в HTML: {str(e)}"
             print(error_msg)

@@ -381,7 +381,7 @@ def append_or_update_styles(
 
     styles = []
     if is_appendix:
-        css_appendices_path = base_path / "css" / "styles_appendices.css"
+        css_appendices_path = base_path / "src" / "css" / "styles_appendices.css"
         if css_appendices_path.exists():
             with open(css_appendices_path, "r", encoding="utf-8") as css_file:
                 css_content = css_file.read().strip()
@@ -393,7 +393,7 @@ def append_or_update_styles(
             print(f"Файл {css_appendices_path} не найден")
     else:
         if has_images:
-            css_images_path = base_path / "css" / "styles_images.css"
+            css_images_path = base_path / "src" / "css" / "styles_images.css"
             if css_images_path.exists():
                 with open(css_images_path, "r", encoding="utf-8") as css_file:
                     styles.append(css_file.read().strip())
@@ -401,7 +401,7 @@ def append_or_update_styles(
                 print(f"Файл {css_images_path} не найден")
 
         if has_tables:
-            css_tables_path = base_path / "css" / "styles_tables.css"
+            css_tables_path = base_path / "src" / "css" / "styles_tables.css"
             if css_tables_path.exists():
                 with open(css_tables_path, "r", encoding="utf-8") as css_file:
                     styles.append(css_file.read().strip())
