@@ -107,7 +107,7 @@ def create_or_get_book_in_shelf(base_url, headers, shelf_id, book_name):
 
         # Добавить на полку
         add_payload = {"books": [book_id]}
-        add_resp = requests.put(
+        add_resp = requests.post(
             f"{base_url}/api/shelves/{shelf_id}/books",
             headers=headers,
             json=add_payload,
@@ -124,38 +124,53 @@ def create_or_get_book_in_shelf(base_url, headers, shelf_id, book_name):
         return None
 
 
-def create_page_from_md(base_url, headers, book_id, md_path):
+def create_page_from_md(base_url: str, headers: dict, book_id: int, md_path: str):
     """
-    Создать страницу в книге из MD-файла (конвертировать в HTML).
-    Возвращает True при успехе, False при ошибке.
+    Создаёт страницу на сервере, передавая исходный Markdown в поле 'markdown'.
+    Возвращает распарсенный JSON ответа при успехе или False при ошибке.
     """
     try:
+        # Чтение markdown-файла
         with open(md_path, "r", encoding="utf-8") as f:
             md_content = f.read()
 
-        html_content = markdown.markdown(
-            md_content, extensions=["fenced_code", "tables", "codehilite"]
-        )
+        page_name = Path(md_path).stem
 
-        page_name = f"Содержимое {Path(md_path).stem}"
-        page_payload = {
+        payload = {
             "name": page_name,
             "book_id": book_id,
-            "html": html_content,
+            "markdown": md_content,  # <-- отправляем markdown, не конвертируем в HTML
             "priority": 1,
             "draft": False,
             "tags": [{"name": "страница-из-md"}],
         }
 
-        page_resp = requests.post(
-            f"{base_url}/api/pages", headers=headers, json=page_payload
+        resp = requests.post(
+            f"{base_url}/api/pages", headers=headers, json=payload, timeout=30
         )
-        if page_resp.status_code == 200:
-            print(f"Страница '{page_name}' создана в книге {book_id}")
-            return True
+
+        # Учитываем успешные коды 200..299 (включая 201)
+        if resp.ok:
+            try:
+                return resp.json()
+            except ValueError:
+                # Если ответ не JSON — вернуть текст
+                return resp.text
         else:
-            print(f"Ошибка создания страницы '{page_name}': {page_resp.text}")
+            print(
+                f"Ошибка создания страницы '{page_name}': {resp.status_code} {resp.text}"
+            )
             return False
+
+    except (IOError, OSError) as e:
+        print(f"Ошибка чтения файла '{md_path}': {e}")
+        return False
+    except requests.RequestException as e:
+        print(f"Сетевая ошибка при запросе к {base_url}: {e}")
+        return False
+    except Exception as e:
+        print(f"Непредвиденная ошибка: {e}")
+        return False
 
     except Exception as e:
         print(f"Исключение при создании страницы: {str(e)}")
