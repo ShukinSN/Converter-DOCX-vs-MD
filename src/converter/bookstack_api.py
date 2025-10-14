@@ -93,18 +93,25 @@ def create_or_get_book_in_shelf(base_url, headers, shelf_id, book_name):
         book_data = book_resp.json()
         book_id = book_data["id"]
 
-        # Добавить на полку
-        add_payload = {"books": [book_id]}
-        add_resp = requests.post(
-            f"{base_url}/api/shelves/{shelf_id}/books",
+        # Получить текущие ID книг на полке и добавить новый
+        current_book_ids = [b["id"] for b in books]
+        if book_id not in current_book_ids:  # Избежать дубликатов
+            current_book_ids.append(book_id)
+
+        # Обновить полку с новым списком книг (PUT, перезаписывает список)
+        update_payload = {"books": current_book_ids}
+        update_resp = requests.put(
+            f"{base_url}/api/shelves/{shelf_id}",
             headers=headers,
-            json=add_payload,
+            json=update_payload,
         )
-        if add_resp.status_code != 200:
-            print(f"Ошибка добавления книги на полку: {add_resp.text}")
+        if update_resp.status_code != 200:
+            print(f"Ошибка обновления полки (привязка книги): {update_resp.text}")
+            # Опционально: Удалить созданную книгу, если привязка не удалась
+            # requests.delete(f"{base_url}/api/books/{book_id}", headers=headers)
             return None
 
-        print(f"Книга '{book_name}' создана и добавлена (ID: {book_id})")
+        print(f"Книга '{book_name}' создана и добавлена к полке (ID: {book_id})")
         return book_id
 
     except Exception as e:
