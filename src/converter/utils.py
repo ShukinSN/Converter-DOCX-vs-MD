@@ -11,10 +11,12 @@ warnings.filterwarnings("ignore", category=UserWarning, module="wand.*")
 
 
 def sanitize_filename(name):
+    """Очистка имени файла от недопустимых символов."""
     return re.sub(r'[\\/*?:"<>|]', "_", name)
 
 
 def convert_emf_to_png(emf_path):
+    """Конвертация EMF в PNG."""
     try:
         png_path = Path(emf_path).with_suffix(".png")
         with Image(filename=str(emf_path)) as img:

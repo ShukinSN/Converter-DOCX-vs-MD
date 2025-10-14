@@ -7,6 +7,8 @@ import markdown
 
 
 class ModernPreviewWindow(QMainWindow):
+    """Окно предпросмотра Markdown."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Предпросмотр Markdown")
@@ -17,6 +19,7 @@ class ModernPreviewWindow(QMainWindow):
         print("Инициализировано окно предпросмотра")
 
     def init_ui(self):
+        """Инициализация UI окна предпросмотра."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
@@ -32,6 +35,7 @@ class ModernPreviewWindow(QMainWindow):
 
     @classmethod
     def get_styles(cls, project_root, is_appendix=False, appendix_letter="А"):
+        """Получение стилей CSS для предпросмотра."""
         styles = []
         css_files = []
         base_path = Path(getattr(sys, "_MEIPASS", project_root))
@@ -67,6 +71,7 @@ class ModernPreviewWindow(QMainWindow):
         return "\n".join(styles) if styles else ""
 
     def set_content(self, content, is_appendix=False, appendix_letter="А"):
+        """Установка содержимого для предпросмотра."""
         try:
             self.markdown_view.setPlainText(content)
             print("Markdown контент установлен")
@@ -88,6 +93,7 @@ class ModernPreviewWindow(QMainWindow):
             self.html_view.setPlainText(error_msg)
 
     def closeEvent(self, event):
+        """Обработка закрытия окна."""
         if self.parent():
             self.parent().preview_window = None
             print("Ссылка на окно предпросмотра удалена")

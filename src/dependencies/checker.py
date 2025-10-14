@@ -4,8 +4,11 @@ import wand.version
 
 
 class DependencyChecker:
+    """Проверка зависимостей приложения."""
+
     @staticmethod
     def check():
+        """Проверка наличия и версий зависимостей."""
         missing = []
         try:
             version = pypandoc.get_pandoc_version()

@@ -36,19 +36,10 @@ import subprocess
 
 
 class BookStackWidget(QWidget):
-    """
-    Виджет для вкладки BookStack в главном окне.
-    Отвечает за UI и логику загрузки файлов в BookStack.
-    """
+    """Виджет для вкладки BookStack в главном окне."""
 
     def __init__(self, parent, converted_files, output_folder, project_root):
-        """
-        Инициализация виджета.
-        :param parent: Родительское окно (DocxToMarkdownConverter)
-        :param converted_files: Список путей к конвертированным MD-файлам
-        :param output_folder: Папка вывода для файлов
-        :param project_root: Корень проекта для путей
-        """
+        """Инициализация виджета."""
         super().__init__(parent)
         self.parent_window = parent
         self.converted_files = converted_files
@@ -60,9 +51,7 @@ class BookStackWidget(QWidget):
         self.update_file_list()  # Обновление списка файлов
 
     def init_ui(self):
-        """
-        Создание и настройка UI-элементов виджета.
-        """
+        """Создание и настройка UI-элементов виджета."""
         # Основной горизонтальный layout для разделения на левую и правую части
         main_layout = QHBoxLayout(self)
         main_layout.setSpacing(12)  # Отступы между частями

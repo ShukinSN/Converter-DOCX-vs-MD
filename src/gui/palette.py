@@ -4,8 +4,11 @@ from PyQt5.QtCore import Qt
 
 
 class DarkPalette:
+    """Тёмная палитра для приложения."""
+
     @staticmethod
     def apply(app):
+        """Применение тёмной палитры."""
         app.setStyle(QStyleFactory.create("Fusion"))
         dark_palette = QPalette()
         dark_palette.setColor(QPalette.Window, QColor(53, 53, 53))

@@ -18,12 +18,15 @@ from .utils import (
 
 
 class EnhancedConverterThread(QThread):
+    """Поток для конвертации файлов."""
+
     progress_updated = pyqtSignal(int, str)
     conversion_finished = pyqtSignal(str, str, str)
     finished_all = pyqtSignal(int)
     error_occurred = pyqtSignal(str)
 
     def __init__(self, files, output_folder, options, project_root):
+        """Инициализация потока."""
         super().__init__()
         self.files = files
         self.output_folder = output_folder
@@ -33,6 +36,7 @@ class EnhancedConverterThread(QThread):
         self.successful_files = []  # Новое: список путей успешных MD-файлов
 
     def run(self):
+        """Основной цикл конвертации."""
         total_files = len(self.files)
         success_count = 0
 

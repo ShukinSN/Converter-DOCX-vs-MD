@@ -6,10 +6,7 @@ from datetime import datetime
 
 
 def get_shelves(base_url, headers):
-    """
-    Получить список всех полок.
-    Возвращает список dicts или None при ошибке.
-    """
+    """Получить список всех полок."""
     try:
         shelves_resp = requests.get(f"{base_url}/api/shelves", headers=headers)
         if shelves_resp.status_code != 200:
@@ -22,10 +19,7 @@ def get_shelves(base_url, headers):
 
 
 def get_books_in_shelf(base_url, headers, shelf_id):
-    """
-    Получить список книг в полке.
-    Возвращает список dicts или None при ошибке.
-    """
+    """Получить список книг в полке."""
     try:
         books_resp = requests.get(f"{base_url}/api/shelves/{shelf_id}", headers=headers)
         if books_resp.status_code != 200:
@@ -39,10 +33,7 @@ def get_books_in_shelf(base_url, headers, shelf_id):
 
 
 def create_or_get_shelf(base_url, headers, shelf_name):
-    """
-    Получить существующую полку по имени или создать новую.
-    Возвращает ID полки или None при ошибке.
-    """
+    """Получить существующую полку по имени или создать новую."""
     try:
         # Получить все полки
         shelves_resp = requests.get(f"{base_url}/api/shelves", headers=headers)
@@ -76,10 +67,7 @@ def create_or_get_shelf(base_url, headers, shelf_name):
 
 
 def create_or_get_book_in_shelf(base_url, headers, shelf_id, book_name):
-    """
-    Получить существующую книгу в полке по имени или создать новую и добавить.
-    Возвращает ID книги или None при ошибке.
-    """
+    """Получить существующую книгу в полке по имени или создать новую и добавить."""
     try:
         # Получить книги полки
         books = get_books_in_shelf(base_url, headers, shelf_id)
@@ -125,10 +113,7 @@ def create_or_get_book_in_shelf(base_url, headers, shelf_id, book_name):
 
 
 def create_page_from_md(base_url: str, headers: dict, book_id: int, md_path: str):
-    """
-    Создаёт страницу на сервере, передавая исходный Markdown в поле 'markdown'.
-    Возвращает распарсенный JSON ответа при успехе или False при ошибке.
-    """
+    """Создаёт страницу на сервере, передавая исходный Markdown в поле 'markdown'."""
     try:
         # Чтение markdown-файла
         with open(md_path, "r", encoding="utf-8") as f:

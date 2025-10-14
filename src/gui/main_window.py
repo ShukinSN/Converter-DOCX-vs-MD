@@ -2,8 +2,8 @@ import os
 import sys
 import subprocess
 import tempfile
-import re  # Added for preview parsing
-import zipfile  # For DOCX preview
+import re
+import zipfile
 from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -36,6 +36,8 @@ import pypandoc
 
 
 class DocxToMarkdownConverter(QMainWindow):
+    """Главное окно приложения для конвертации DOCX в Markdown."""
+
     def __init__(self):
         super().__init__()
         self.thread = None
@@ -47,6 +49,7 @@ class DocxToMarkdownConverter(QMainWindow):
         QTimer.singleShot(100, self.check_pandoc_installation)
 
     def init_ui(self):
+        """Инициализация пользовательского интерфейса."""
         self.setWindowTitle("DOCX to Markdown Converter")
         self.setGeometry(100, 100, 900, 700)
 
