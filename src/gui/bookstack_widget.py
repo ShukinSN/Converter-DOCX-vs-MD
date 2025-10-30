@@ -13,9 +13,11 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QCheckBox,
     QFileDialog,
+    QTextEdit,
+    QProgressBar,
 )
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal
+from PyQt5.QtGui import QIcon, QTextCursor
 from pathlib import Path
 import os
 import resources_rc
@@ -29,6 +31,51 @@ from converter.bookstack_api import (
 )
 
 
+# === ПОТОК ДЛЯ ЗАГРУЗКИ ===
+class UploadWorker(QThread):
+    progress = pyqtSignal(int, str)  # value, status
+    log = pyqtSignal(str, str)  # message, color
+    finished = pyqtSignal(int)  # success_count
+
+    def __init__(self, base_url, headers, book_id, md_files):
+        super().__init__()
+        self.base_url = base_url
+        self.headers = headers
+        self.book_id = book_id
+        self.md_files = md_files
+        self._canceled = False
+
+    def cancel(self):
+        self._canceled = True
+
+    def run(self):
+        total = len(self.md_files)
+        success = 0
+        self.progress.emit(0, f"Начинаем загрузку {total} файлов...")
+        for i, md_path in enumerate(self.md_files):
+            if self._canceled:
+                break
+            filename = Path(md_path).name
+            self.progress.emit(int((i / total) * 100), f"Загрузка: {filename}")
+
+            # Передаём лог в API
+            def log_cb(msg, color):
+                self.log.emit(msg, color)
+
+            if upload_md_with_images(
+                self.base_url, self.headers, self.book_id, md_path, log_callback=log_cb
+            ):
+                success += 1
+                self.log.emit(f"Успешно: {filename}", "green")
+            else:
+                self.log.emit(f"Ошибка: {filename}", "red")
+
+        if not self._canceled:
+            self.progress.emit(100, f"Готово! Успешно: {success}/{total}")
+            self.finished.emit(success)
+
+
+# === ОСНОВНОЙ ВИДЖЕТ ===
 class BookStackWidget(QWidget):
     def __init__(self, parent, converted_files, output_folder, project_root):
         super().__init__(parent)
@@ -38,17 +85,22 @@ class BookStackWidget(QWidget):
         self.project_root = Path(project_root)
         self.shelves = []
         self.books = []
+        self.worker = None
         self.init_ui()
         self.update_file_list()
 
     def init_ui(self):
-        main_layout = QHBoxLayout(self)
+        main_layout = QVBoxLayout(self)
         main_layout.setSpacing(12)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+
+        # === Верхняя часть ===
+        top_layout = QHBoxLayout()
 
         left_layout = QVBoxLayout()
         left_layout.setSpacing(12)
 
-        # === Настройки подключения ===
+        # === Подключение ===
         connection_group = QGroupBox("Настройки подключения")
         connection_layout = QVBoxLayout()
         connection_layout.setSpacing(8)
@@ -71,7 +123,7 @@ class BookStackWidget(QWidget):
         connection_group.setLayout(connection_layout)
         left_layout.addWidget(connection_group)
 
-        # === Настройки загрузки ===
+        # === Загрузка ===
         upload_group = QGroupBox("Настройки загрузки")
         shelf_layout = QHBoxLayout()
         self.shelf_combo = QComboBox()
@@ -115,7 +167,7 @@ class BookStackWidget(QWidget):
         upload_group.setLayout(upload_layout)
         left_layout.addWidget(upload_group)
 
-        # === Список файлов ===
+        # === Файлы ===
         file_group = QGroupBox("Конвертированные файлы")
         file_layout = QHBoxLayout()
         self.file_list = QListWidget()
@@ -140,16 +192,38 @@ class BookStackWidget(QWidget):
         file_group.setLayout(file_layout)
         left_layout.addWidget(file_group)
 
-        # === Кнопка загрузки ===
+        top_layout.addLayout(left_layout, 1)
+        main_layout.addLayout(top_layout)
+
+        # === КНОПКА ЗАГРУЗКИ ===
         btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
         self.upload_btn = QPushButton("Загрузить в BookStack")
         self.upload_btn.clicked.connect(self.upload_to_bookstack)
-        btn_layout.addStretch()
+        self.cancel_btn = QPushButton("Отмена")
+        self.cancel_btn.clicked.connect(self.cancel_upload)
+        self.cancel_btn.setEnabled(False)
         btn_layout.addWidget(self.upload_btn)
-        left_layout.addLayout(btn_layout)
+        btn_layout.addWidget(self.cancel_btn)
+        main_layout.addLayout(btn_layout)
 
-        main_layout.addLayout(left_layout, 1)
-        main_layout.addStretch()
+        # === ПРОГРЕСС-БАР ===
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("Готово")
+        main_layout.addWidget(self.progress_bar)
+
+        # === ЛОГ ===
+        log_group = QGroupBox("Лог:")
+        log_layout = QVBoxLayout()
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setMinimumHeight(120)
+        log_layout.addWidget(self.log_text)
+        log_group.setLayout(log_layout)
+        main_layout.addWidget(log_group)
 
     def toggle_new_shelf(self, state):
         self.new_shelf_edit.setEnabled(state == Qt.Checked)
@@ -310,14 +384,52 @@ class BookStackWidget(QWidget):
             QMessageBox.critical(self, "Ошибка", "Не удалось создать/найти книгу")
             return
 
-        success_count = 0
-        for md_path in self.converted_files:
-            if upload_md_with_images(bs_url, headers, book_id, md_path):
-                success_count += 1
+        # === СТАРТ С ПРОГРЕССОМ И ЛОГОМ ===
+        self.upload_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("Инициализация...")
+        self.log_text.clear()
 
+        self.worker = UploadWorker(bs_url, headers, book_id, self.converted_files)
+        self.worker.progress.connect(self.update_progress)
+        self.worker.log.connect(self.append_log)
+        self.worker.finished.connect(self.upload_finished)
+        self.worker.start()
+
+    def update_progress(self, value, status):
+        self.progress_bar.setValue(value)
+        self.progress_bar.setFormat(status)
+
+    def append_log(self, message, color):
+        color_map = {
+            "green": "green",
+            "red": "red",
+            "blue": "#0066cc",
+            "gray": "gray",
+            "orange": "#ff8800",
+        }
+        color_tag = color_map.get(color, "black")
+        self.log_text.append(f'<font color="{color_tag}">{message}</font>')
+        self.log_text.moveCursor(QTextCursor.End)
+
+    def upload_finished(self, success_count):
+        self.cleanup_upload()
         QMessageBox.information(
             self,
             "Готово!",
-            f"Загружено {success_count}/{len(self.converted_files)} файлов\n"
-            f"Изображения встроены в текст через Markdown",
+            f"Успешно загружено {success_count} из {len(self.converted_files)} файлов",
         )
+
+    def cancel_upload(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.cancel()
+            self.worker.wait()
+        self.cleanup_upload()
+        self.append_log("Загрузка отменена пользователем", "orange")
+
+    def cleanup_upload(self):
+        self.upload_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setFormat("Готово")
+        self.progress_bar.setValue(100)

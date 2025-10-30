@@ -3,8 +3,13 @@ import requests
 import re
 from pathlib import Path
 from datetime import datetime
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
+# === ОСНОВНЫЕ ФУНКЦИИ ===
 def get_shelves(base_url, headers):
     try:
         resp = requests.get(f"{base_url}/api/shelves", headers=headers, timeout=30)
@@ -94,16 +99,23 @@ def create_or_get_book_in_shelf(base_url, headers, shelf_id, book_name):
         return None
 
 
+# === ЗАГРУЗКА СТРАНИЦЫ + ИЗОБРАЖЕНИЙ ===
 def upload_md_with_images(
-    base_url: str, headers: dict, book_id: int, md_path: str, images_dir: str = "images"
+    base_url: str,
+    headers: dict,
+    book_id: int,
+    md_path: str,
+    images_dir: str = "images",
+    log_callback=None,
 ) -> bool:
     """
-    Загружает изображения через /api/image-gallery с type='gallery'
-    Заменяет <img src="images/..."> на <img src="https://.../gallery/...">
+    Загружает страницу + изображения через Gallery API
+    log_callback(message, color) — вызывается для каждого события
     """
     md_path = Path(md_path)
     if not md_path.exists():
-        print(f"Файл не найден: {md_path}")
+        if log_callback:
+            log_callback(f"Файл не найден: {md_path}", "red")
         return False
 
     try:
@@ -139,24 +151,34 @@ def upload_md_with_images(
             f"{base_url}/api/pages", headers=headers, json=payload, timeout=30
         )
         if not resp.ok:
-            print(f"Ошибка создания страницы: {resp.text}")
+            error_msg = f"Ошибка создания страницы: {resp.text}"
+            if log_callback:
+                log_callback(error_msg, "red")
+            print(error_msg)
             return False
 
         page_id = resp.json()["id"]
-        print(f"Страница создана: {page_name} (ID: {page_id})")
+        if log_callback:
+            log_callback(f"Страница создана: {page_name} (ID: {page_id})", "blue")
 
         if not local_images:
             return True
 
-        # === 3. Загрузка через /api/image-gallery ===
+        # === 3. Загрузка изображений через Gallery API ===
         replacement_map = {}
+        total_images = len(local_images)
+        uploaded = 0
 
         for src, is_markdown in local_images:
             img_name = Path(src).name
             img_path = img_folder / img_name
             if not img_path.exists():
-                print(f"Изображение не найдено: {img_path}")
+                if log_callback:
+                    log_callback(f"Изображение не найдено: {img_path}", "red")
                 continue
+
+            if log_callback:
+                log_callback(f"Загружается изображение: {img_name}", "gray")
 
             files = {"image": (img_name, open(img_path, "rb"), "image/png")}
             data = {"type": "gallery", "uploaded_to": page_id}
@@ -170,17 +192,23 @@ def upload_md_with_images(
             )
 
             if not gallery_resp.ok:
-                print(f"Ошибка загрузки в Gallery {img_name}: {gallery_resp.text}")
+                error_msg = f"Ошибка загрузки {img_name}: {gallery_resp.text}"
+                if log_callback:
+                    log_callback(error_msg, "red")
+                print(error_msg)
                 continue
 
             gallery_data = gallery_resp.json()
             gallery_url = gallery_data.get("url")
             if not gallery_url:
-                print(f"Нет URL в ответе для {img_name}: {gallery_data}")
+                if log_callback:
+                    log_callback(f"Нет URL для {img_name}: {gallery_data}", "red")
                 continue
 
             replacement_map[src] = gallery_url
-            print(f"Загружено в Gallery: {img_name} → {gallery_url}")
+            uploaded += 1
+            if log_callback:
+                log_callback(f"Успешно: {img_name} → {gallery_url}", "green")
 
         if not replacement_map:
             return True
@@ -205,7 +233,7 @@ def upload_md_with_images(
             flags=re.IGNORECASE,
         )
 
-        # === 5. Замена Markdown (если были) ===
+        # === 5. Замена Markdown ===
         def replace_md_path(match):
             alt, old_src = match.groups()
             new_url = replacement_map.get(old_src, old_src)
@@ -222,12 +250,19 @@ def upload_md_with_images(
         )
 
         if update_resp.ok:
-            print("Страница обновлена: изображения через Gallery API")
+            if log_callback:
+                log_callback(
+                    f"Страница обновлена: {uploaded}/{total_images} изображений", "blue"
+                )
             return True
         else:
-            print(f"Ошибка обновления: {update_resp.text}")
+            error_msg = f"Ошибка обновления: {update_resp.text}"
+            if log_callback:
+                log_callback(error_msg, "red")
             return False
 
     except Exception as e:
-        print(f"Ошибка при загрузке {md_path.name}: {str(e)}")
+        error_msg = f"Исключение при загрузке {md_path.name}: {str(e)}"
+        if log_callback:
+            log_callback(error_msg, "red")
         return False
