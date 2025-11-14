@@ -26,50 +26,66 @@ class EnhancedConverterThread(QThread):
     error_occurred = pyqtSignal(str)
 
     def __init__(self, files, output_folder, options, project_root):
-        """Инициализация потока."""
+        """
+        files: list[tuple[str, str|None]] — (full_path, base_folder_str_or_None)
+               или list[str] — старый формат (обратная совместимость)
+        """
         super().__init__()
-        self.files = files
+        # === НОВОЕ: Поддержка нового формата ===
+        if files and isinstance(files[0], tuple):
+            self.files_with_bases = files  # [(path, base_folder), ...]
+        else:
+            self.files_with_bases = [
+                (f, None) for f in files
+            ]  # старый формат → base_folder=None
+        # === КОНЕЦ НОВОГО ===
+
         self.output_folder = output_folder
         self.options = options
         self.project_root = Path(project_root)
         self._is_running = True
         self.successful_files = []  # Новое: список путей успешных MD-файлов
+        self.chapter_groups = {}  # Добавляем для хранения групп
 
     def run(self):
         """Основной цикл конвертации."""
-        total_files = len(self.files)
+        total_files = len(self.files_with_bases)
         success_count = 0
 
-        # Отладочный вывод для проверки appendix_letter
         appendix_letter = self.options.get("appendix_letter", "А")
         is_appendix = self.options.get("appendix", False)
-        print(f"Режим приложений: {is_appendix}, Буква приложения: {appendix_letter}")
 
-        for i, input_path in enumerate(self.files):
+        for i, (input_path_str, base_folder_str) in enumerate(self.files_with_bases):
             if not self._is_running:
                 break
 
-            filename = Path(input_path).name
+            input_path = Path(input_path_str).resolve()
+            base_folder = Path(base_folder_str) if base_folder_str else None
+            filename = input_path.name
+
             self.progress_updated.emit(
-                int((i / total_files) * 80), f"Обработка файла: {filename}"
+                int((i / total_files) * 80), f"Обработка: {filename}"
             )
 
             try:
-                input_path = Path(input_path).resolve()
                 if not input_path.exists():
                     raise FileNotFoundError(f"Файл не найден: {filename}")
                 if not os.access(input_path, os.R_OK):
-                    raise PermissionError(f"Нет прав на чтение файла: {filename}")
+                    raise PermissionError(f"Нет прав на чтение: {filename}")
 
-                output_folder = Path(self.output_folder).resolve()
-                if not output_folder.exists():
-                    output_folder.mkdir(parents=True)
-                if not os.access(output_folder, os.W_OK):
-                    raise PermissionError(
-                        f"Нет прав на запись в папку: {self.output_folder}"
-                    )
+                output_root = Path(self.output_folder).resolve()
+                output_root.mkdir(parents=True, exist_ok=True)
 
-                output_images_dir = output_folder / "images"
+                # === НОВОЕ: Определение выходной папки с сохранением структуры ===
+                if base_folder and input_path.parent != base_folder:
+                    rel_dir = input_path.parent.relative_to(base_folder)
+                    output_dir = output_root / rel_dir
+                else:
+                    output_dir = output_root
+                output_dir.mkdir(parents=True, exist_ok=True)
+                # === КОНЕЦ НОВОГО ===
+
+                output_images_dir = output_dir / "images"
                 output_images_dir.mkdir(exist_ok=True)
 
                 if not zipfile.is_zipfile(input_path):
@@ -77,7 +93,7 @@ class EnhancedConverterThread(QThread):
 
                 base_name = input_path.stem
                 safe_name = sanitize_filename(base_name)
-                output_path = output_folder / f"{safe_name}.md"
+                output_path = output_dir / f"{safe_name}.md"
 
                 if output_path.exists() and not self.options.get("overwrite"):
                     raise FileExistsError(f"Файл уже существует: {output_path}")
@@ -105,18 +121,18 @@ class EnhancedConverterThread(QThread):
                         raise RuntimeError(f"Ошибка Pandoc: {str(e)}")
 
                     self.progress_updated.emit(
-                        int((i / total_files) * 80 + 10),
-                        f"Конвертирован в Markdown: {filename}",
+                        int((i / total_files) * 80 + 10), f"Конвертирован: {filename}"
                     )
 
+                    # === СТАРЫЙ КОД: Обработка изображений и таблиц ===
                     try:
                         process_images(
                             output_path,
                             temp_dir,
                             self.project_root,
                             output_images_dir,
-                            is_appendix=self.options.get("appendix", False),
-                            appendix_letter=self.options.get("appendix_letter", "А"),
+                            is_appendix=is_appendix,
+                            appendix_letter=appendix_letter,
                         )
                         self.progress_updated.emit(
                             int((i / total_files) * 80 + 15),
@@ -129,8 +145,8 @@ class EnhancedConverterThread(QThread):
                         process_tables(
                             output_path,
                             self.project_root,
-                            is_appendix=self.options.get("appendix", False),
-                            appendix_letter=self.options.get("appendix_letter", "А"),
+                            is_appendix=is_appendix,
+                            appendix_letter=appendix_letter,
                         )
                         self.progress_updated.emit(
                             int((i / total_files) * 80 + 20),
@@ -204,23 +220,20 @@ class EnhancedConverterThread(QThread):
                                 self.project_root,
                                 has_images,
                                 has_tables,
-                                is_appendix=self.options.get("appendix", False),
-                                appendix_letter=self.options.get(
-                                    "appendix_letter", "А"
-                                ),
+                                is_appendix=is_appendix,
+                                appendix_letter=appendix_letter,
                             )
                         except Exception as e:
                             self.error_occurred.emit(
                                 f"Ошибка при добавлении стилей ({filename}): {str(e)}"
                             )
+                    # === КОНЕЦ СТАРОГО КОДА ===
 
                     success_count += 1
                     self.conversion_finished.emit(
                         filename, f"Успешно: {safe_name}.md", str(output_path)
                     )
-                    self.successful_files.append(
-                        str(output_path)
-                    )  # Новое: добавляем путь
+                    self.successful_files.append(str(output_path))
 
             except Exception as e:
                 error_msg = f"Ошибка ({filename}): {str(e)}"

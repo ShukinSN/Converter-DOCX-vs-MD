@@ -1,23 +1,36 @@
-# src/converter/bookstack_api.py
 import requests
 import re
 from pathlib import Path
 from datetime import datetime
 from tagger.smart_tagger import SmartTagger
 import logging
+from typing import Dict, List
+from datetime import datetime
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# === ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ API-ЗАГОЛОВКОВ ===
+def _api_headers(headers: Dict) -> Dict:
+    """Добавляет Accept: application/json для всех API-запросов."""
+    h = headers.copy()
+    h["Accept"] = "application/json"
+    return h
+
+
 # === ПОЛКИ (SHELVES) ===
 def get_shelves(base_url: str, headers: dict) -> list | None:
     """Получить список полок."""
     try:
-        resp = requests.get(f"{base_url}/api/shelves", headers=headers, timeout=30)
+        resp = requests.get(
+            f"{base_url}/api/shelves", headers=_api_headers(headers), timeout=30
+        )
         if resp.status_code != 200:
-            logger.error(f"Ошибка получения полок: {resp.status_code} {resp.text}")
+            logger.error(
+                f"Ошибка получения полок: {resp.status_code} {resp.text[:500]}"
+            )
             return None
         return resp.json().get("data", [])
     except Exception as e:
@@ -32,18 +45,19 @@ def create_or_get_shelf(base_url: str, headers: dict, shelf_name: str) -> int | 
         if not shelves:
             return None
 
-        # Поиск существующей
         existing = next((s for s in shelves if s["name"] == shelf_name), None)
         if existing:
             return existing["id"]
 
-        # Создание новой
         payload = {
             "name": shelf_name,
             "description": f"Авто-создано {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         }
         resp = requests.post(
-            f"{base_url}/api/shelves", headers=headers, json=payload, timeout=30
+            f"{base_url}/api/shelves",
+            headers=_api_headers(headers),
+            json=payload,
+            timeout=30,
         )
         if resp.status_code not in [200, 201]:
             logger.error(f"Ошибка создания полки: {resp.text}")
@@ -59,10 +73,12 @@ def get_books_in_shelf(base_url: str, headers: dict, shelf_id: int) -> list | No
     """Получить книги в полке."""
     try:
         resp = requests.get(
-            f"{base_url}/api/shelves/{shelf_id}", headers=headers, timeout=30
+            f"{base_url}/api/shelves/{shelf_id}",
+            headers=_api_headers(headers),
+            timeout=30,
         )
         if resp.status_code != 200:
-            logger.error(f"Ошибка получения книг в полке {shelf_id}: {resp.text}")
+            logger.error(f"Ошибка получения книг в полке {shelf_id}: {resp.text[:500]}")
             return None
         return resp.json().get("books", [])
     except Exception as e:
@@ -79,18 +95,19 @@ def create_or_get_book_in_shelf(
         if books is None:
             return None
 
-        # Поиск существующей
         existing = next((b for b in books if b["name"] == book_name), None)
         if existing:
             return existing["id"]
 
-        # Создание новой книги
         payload = {
             "name": book_name,
             "description": f"Авто-создано {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         }
         resp = requests.post(
-            f"{base_url}/api/books", headers=headers, json=payload, timeout=30
+            f"{base_url}/api/books",
+            headers=_api_headers(headers),
+            json=payload,
+            timeout=30,
         )
         if resp.status_code not in [200, 201]:
             logger.error(f"Ошибка создания книги: {resp.text}")
@@ -98,13 +115,12 @@ def create_or_get_book_in_shelf(
 
         book_id = resp.json()["id"]
 
-        # Добавление книги в полку
         current_book_ids = [b["id"] for b in books]
         if book_id not in current_book_ids:
             current_book_ids.append(book_id)
             update_resp = requests.put(
                 f"{base_url}/api/shelves/{shelf_id}",
-                headers=headers,
+                headers=_api_headers(headers),
                 json={"books": current_book_ids},
                 timeout=30,
             )
@@ -117,7 +133,40 @@ def create_or_get_book_in_shelf(
         return None
 
 
-# === ЗАГРУЗКА СТРАНИЦЫ + ИЗОБРАЖЕНИЯ + АВТОТЕГИРОВАНИЕ ===
+# === ГЛАВЫ (CHAPTERS) ===
+def create_or_get_chapter(
+    base_url: str, headers: dict, book_id: int, chapter_name: str
+) -> int | None:
+    try:
+        resp = requests.get(
+            f"{base_url}/api/chapters?book_id={book_id}", headers=headers, timeout=30
+        )
+        if not resp.ok:
+            logger.error(f"Ошибка получения глав: {resp.text}")
+            return None
+        chapters = resp.json().get("data", [])
+        existing = next((c for c in chapters if c["name"] == chapter_name), None)
+        if existing:
+            return existing["id"]
+
+        payload = {
+            "book_id": book_id,
+            "name": chapter_name,
+            "description": f"Авто-создано {datetime.now().strftime('%Y-%m-%d')}",
+        }
+        resp = requests.post(
+            f"{base_url}/api/chapters", headers=headers, json=payload, timeout=30
+        )
+        if resp.ok:
+            return resp.json()["id"]
+        logger.error(f"Ошибка создания главы: {resp.text}")
+        return None
+    except Exception as e:
+        logger.exception(f"Ошибка в create_or_get_chapter: {e}")
+        return None
+
+
+# === ЗАГРУЗКА MD С ИЗОБРАЖЕНИЯМИ ===
 def upload_md_with_images(
     base_url: str,
     headers: dict,
@@ -126,15 +175,8 @@ def upload_md_with_images(
     images_dir: str = "images",
     log_callback=None,
     auto_tags: bool = True,
+    chapter_id: int = None,
 ) -> bool:
-    """
-    Загружает Markdown-страницу и изображения.
-    Поддерживает:
-      - Создание страницы
-      - Загрузку изображений через Gallery API
-      - Замену ссылок
-      - Автоматическое тегирование (если auto_tags=True)
-    """
     md_path = Path(md_path)
     if not md_path.exists():
         if log_callback:
@@ -148,31 +190,32 @@ def upload_md_with_images(
         page_name = md_path.stem
         img_folder = md_path.parent / images_dir
 
-        # === 1. АВТОТЕГИРОВАНИЕ ===
         tags_for_api = []
         if auto_tags:
             try:
                 tagger = SmartTagger()
                 raw_tags = tagger.get_document_tags(md_path, md_content)
-                tags_for_api = [{"name": tag, "value": ""} for tag in raw_tags]
-                if log_callback:
-                    log_callback(f"Теги: {', '.join(raw_tags)}", "blue")
+                tags_for_api = [{"name": t, "value": ""} for t in raw_tags]
             except Exception as e:
-                logger.warning(f"Ошибка тегирования {md_path.name}: {e}")
                 if log_callback:
                     log_callback(f"Тегирование не удалось: {e}", "orange")
 
-        # === 2. Создание страницы ===
         payload = {
             "name": page_name,
             "book_id": book_id,
             "markdown": md_content,
             "priority": 1,
             "draft": False,
-            "tags": tags_for_api,  # ← Добавлено
+            "tags": tags_for_api,
         }
+        if chapter_id:
+            payload["chapter_id"] = chapter_id
+
         resp = requests.post(
-            f"{base_url}/api/pages", headers=headers, json=payload, timeout=30
+            f"{base_url}/api/pages",
+            headers=_api_headers(headers),
+            json=payload,
+            timeout=30,
         )
         if not resp.ok:
             error_msg = f"Ошибка создания страницы: {resp.text}"
@@ -183,15 +226,12 @@ def upload_md_with_images(
 
         page_id = resp.json()["id"]
         if log_callback:
-            log_callback(f"Страница создана: {page_name} (ID: {page_id})", "blue")
+            log_callback(f"Создана страница: {page_name}", "blue")
 
-        # === 3. Поиск локальных изображений ===
-        html_images = re.findall(
-            r'<img[^>]+src=["\']([^"\']+)["\'][^>]*>', md_content, re.IGNORECASE
-        )
-        markdown_images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", md_content)
-
+        # === Изображения ===
         local_images = []
+        html_images = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', md_content, re.I)
+        markdown_images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", md_content)
         for src in html_images:
             if not src.startswith(("http://", "https://", "/", "data:", "#")):
                 local_images.append((src, False))
@@ -200,9 +240,8 @@ def upload_md_with_images(
                 local_images.append((src, True))
 
         if not local_images:
-            return True  # Страница создана, изображения не нужны
+            return True
 
-        # === 4. Загрузка изображений ===
         replacement_map = {}
         total = len(local_images)
         uploaded = 0
@@ -224,7 +263,9 @@ def upload_md_with_images(
                     data = {"type": "gallery", "uploaded_to": page_id}
                     gallery_resp = requests.post(
                         f"{base_url}/api/image-gallery",
-                        headers={"Authorization": headers["Authorization"]},
+                        headers={
+                            "Authorization": headers["Authorization"]
+                        },  # Gallery API требует только Authorization
                         files=files,
                         data=data,
                         timeout=30,
@@ -256,7 +297,7 @@ def upload_md_with_images(
         if not replacement_map:
             return True
 
-        # === 5. Замена ссылок ===
+        # === Замена ссылок ===
         def replace_html_img(match):
             full = match.group(0)
             old = match.group(1)
@@ -276,10 +317,10 @@ def upload_md_with_images(
             updated_md,
         )
 
-        # === 6. Обновление страницы ===
+        # === Обновление страницы ===
         update_resp = requests.put(
             f"{base_url}/api/pages/{page_id}",
-            headers=headers,
+            headers=_api_headers(headers),
             json={"markdown": updated_md},
             timeout=30,
         )
