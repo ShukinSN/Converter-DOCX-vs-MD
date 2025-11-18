@@ -621,27 +621,133 @@ class BookStackWidget(QWidget):
         headers = {"Authorization": f"Token {token}"}
         bs_url = url.rstrip("/")
 
-        shelf_name = (
-            self.new_shelf_edit.text().strip()
-            if self.new_shelf_cb.isChecked()
-            else self.shelf_combo.currentText().split(" (")[0]
+        # === ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ДЛЯ ДИАГНОСТИКИ ===
+        self.log_text.clear()
+        self.log_text.append(f'<font color="#00ffff">=== НАЧАЛО ЗАГРУЗКИ ===</font>')
+        self.log_text.append(f'<font color="gray">URL: {bs_url}</font>')
+
+        # Получаем имя полки
+        if self.new_shelf_cb.isChecked():
+            shelf_name = self.new_shelf_edit.text().strip()
+            self.log_text.append(
+                f'<font color="orange">НОВАЯ ПОЛКА: {shelf_name}</font>'
+            )
+        else:
+            if self.shelf_combo.count() == 0:
+                return QMessageBox.warning(self, "Ошибка", "Выберите полку")
+            shelf_text = self.shelf_combo.currentText()
+            shelf_name = (
+                shelf_text.split(" (ID: ")[0] if " (ID: " in shelf_text else shelf_text
+            )
+            self.log_text.append(
+                f'<font color="green">ВЫБРАНА ПОЛКА: {shelf_name}</font>'
+            )
+
+        # Создаем/получаем полку
+        self.log_text.append(
+            f'<font color="gray">Создание/поиск полки: {shelf_name}</font>'
         )
         shelf_id = create_or_get_shelf(bs_url, headers, shelf_name)
         if not shelf_id:
-            return QMessageBox.critical(
-                self, "Ошибка", "Не удалось создать/найти полку"
+            error_msg = f"Не удалось создать/найти полку '{shelf_name}'"
+            self.log_text.append(f'<font color="red">{error_msg}</font>')
+            return QMessageBox.critical(self, "Ошибка", error_msg)
+
+        self.log_text.append(
+            f'<font color="green">Полка найдена/создана: ID {shelf_id}</font>'
+        )
+
+        # Получаем имя книги
+        if self.new_book_cb.isChecked():
+            book_name = self.new_book_edit.text().strip()
+            if not book_name:
+                return QMessageBox.warning(self, "Ошибка", "Введите имя новой книги")
+            self.log_text.append(
+                f'<font color="orange">НОВАЯ КНИГА: {book_name}</font>'
+            )
+        else:
+            if self.book_combo.count() == 0:
+                return QMessageBox.warning(self, "Ошибка", "Выберите книгу")
+            book_text = self.book_combo.currentText()
+            # Более надежное извлечение имени книги и ID
+            if " (ID: " in book_text:
+                book_name = book_text.split(" (ID: ")[0]
+                try:
+                    selected_book_id = int(book_text.split(" (ID: ")[1].rstrip(")"))
+                    self.log_text.append(
+                        f'<font color="green">ВЫБРАНА КНИГА: {book_name} (ID: {selected_book_id})</font>'
+                    )
+                except:
+                    selected_book_id = None
+                    self.log_text.append(
+                        f'<font color="green">ВЫБРАНА КНИГА: {book_name}</font>'
+                    )
+            else:
+                book_name = book_text
+                selected_book_id = None
+                self.log_text.append(
+                    f'<font color="green">ВЫБРАНА КНИГА: {book_name}</font>'
+                )
+
+        # Если выбрана существующая книга, используем её ID напрямую
+        if not self.new_book_cb.isChecked() and selected_book_id:
+            self.log_text.append(
+                f'<font color="#00ffff">Используем существующую книгу с ID: {selected_book_id}</font>'
+            )
+            book_id = selected_book_id
+
+            # Проверяем, что книга действительно в выбранной полке
+            try:
+                shelf_books = get_books_in_shelf(bs_url, headers, shelf_id)
+                if shelf_books:
+                    book_in_shelf = any(
+                        b["id"] == selected_book_id for b in shelf_books
+                    )
+                    if not book_in_shelf:
+                        self.log_text.append(
+                            f'<font color="red">ОШИБКА: Книга "{book_name}" не найдена в полке "{shelf_name}"!</font>'
+                        )
+                        return QMessageBox.critical(
+                            self,
+                            "Ошибка",
+                            f'Книга "{book_name}" не найдена в полке "{shelf_name}".\n\n'
+                            f"Возможные причины:\n"
+                            f"1. Книга была перемещена в другую полку\n"
+                            f"2. Ошибка кэширования списка книг\n\n"
+                            f"Попробуйте:\n"
+                            f'1. Нажать "Обновить" для обновления списка\n'
+                            f"2. Выбрать другую книгу\n"
+                            f"3. Создать новую книгу",
+                        )
+            except Exception as e:
+                self.log_text.append(
+                    f'<font color="orange">Предупреждение: не удалось проверить книгу в полке: {e}</font>'
+                )
+        else:
+            # Создаем новую книгу или ищем по имени
+            self.log_text.append(
+                f'<font color="gray">Создание/поиск книги: {book_name}</font>'
+            )
+            book_id = create_or_get_book_in_shelf(bs_url, headers, shelf_id, book_name)
+            if not book_id:
+                error_msg = f"Не удалось создать/найти книгу '{book_name}' в полке '{shelf_name}'"
+                self.log_text.append(f'<font color="red">{error_msg}</font>')
+                return QMessageBox.critical(self, "Ошибка", error_msg)
+            self.log_text.append(
+                f'<font color="green">Книга найдена/создана: ID {book_id}</font>'
             )
 
-        book_name = (
-            self.new_book_edit.text().strip()
-            if self.new_book_cb.isChecked()
-            else self.book_combo.currentText().split(" (")[0]
+        # Проверка загрузки
+        self.log_text.append(f'<font color="#00ffff">ПАРАМЕТРЫ ЗАГРУЗКИ:</font>')
+        self.log_text.append(
+            f'<font color="gray">- Полка: {shelf_name} (ID: {shelf_id})</font>'
         )
-        book_id = create_or_get_book_in_shelf(bs_url, headers, shelf_id, book_name)
-        if not book_id:
-            return QMessageBox.critical(
-                self, "Ошибка", "Не удалось создать/найти книгу"
-            )
+        self.log_text.append(
+            f'<font color="gray">- Книга: {book_name} (ID: {book_id})</font>'
+        )
+        self.log_text.append(
+            f'<font color="gray">- Файлов для загрузки: {len(self.converted_files) if isinstance(self.converted_files, list) else sum(len(files) for files in self.converted_files.values())}</font>'
+        )
 
         # ← ГЛАВНОЕ: если только "Без главы" — превращаем в list
         file_groups = self.converted_files
@@ -651,12 +757,22 @@ class BookStackWidget(QWidget):
             and "Без главы" in file_groups
         ):
             file_groups = file_groups["Без главы"]
+            self.log_text.append(
+                f'<font color="gray">- Структура: отдельные файлы (без глав)</font>'
+            )
+        elif isinstance(file_groups, dict):
+            self.log_text.append(
+                f'<font color="gray">- Структура: с главами ({len(file_groups)} глав)</font>'
+            )
+        else:
+            self.log_text.append(
+                f'<font color="gray">- Структура: отдельные файлы</font>'
+            )
 
         self.upload_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.progress.setValue(0)
         self.progress.setFormat("Инициализация...")
-        self.log_text.clear()
 
         self.worker = UploadWorker(
             bs_url, headers, book_id, file_groups, self.auto_tags_cb.isChecked()
@@ -669,7 +785,9 @@ class BookStackWidget(QWidget):
         )
         self.worker.finished.connect(
             lambda s: self.cleanup_upload()
-            or QMessageBox.information(self, "Готово", f"Загружено: {s}")
+            or QMessageBox.information(
+                self, "Готово", f"Загружено: {s} файлов в книгу '{book_name}'"
+            )
         )
         self.worker.start()
 

@@ -91,14 +91,47 @@ def create_or_get_book_in_shelf(
 ) -> int | None:
     """Создать книгу или вернуть ID существующей."""
     try:
-        books = get_books_in_shelf(base_url, headers, shelf_id)
-        if books is None:
-            return None
+        logger.info(f"Поиск/создание книги '{book_name}' в полке {shelf_id}")
 
-        existing = next((b for b in books if b["name"] == book_name), None)
-        if existing:
-            return existing["id"]
+        # Сначала пытаемся найти книгу по имени во всех книгах
+        all_books_resp = requests.get(
+            f"{base_url}/api/books", headers=_api_headers(headers), timeout=30
+        )
+        if all_books_resp.ok:
+            all_books = all_books_resp.json().get("data", [])
+            existing_in_all = next(
+                (b for b in all_books if b["name"] == book_name), None
+            )
+            if existing_in_all:
+                logger.info(f"Найдена существующая книга: {existing_in_all['id']}")
+                # Проверяем, есть ли книга уже в полке
+                shelf_books = get_books_in_shelf(base_url, headers, shelf_id)
+                if shelf_books:
+                    existing_in_shelf = next(
+                        (b for b in shelf_books if b["id"] == existing_in_all["id"]),
+                        None,
+                    )
+                    if not existing_in_shelf:
+                        logger.info(
+                            f"Добавляем книгу {existing_in_all['id']} в полку {shelf_id}"
+                        )
+                        # Добавляем существующую книгу в полку
+                        current_book_ids = [b["id"] for b in shelf_books]
+                        current_book_ids.append(existing_in_all["id"])
+                        update_resp = requests.put(
+                            f"{base_url}/api/shelves/{shelf_id}",
+                            headers=_api_headers(headers),
+                            json={"books": current_book_ids},
+                            timeout=30,
+                        )
+                        if update_resp.status_code != 200:
+                            logger.warning(
+                                f"Не удалось добавить книгу в полку: {update_resp.text}"
+                            )
+                return existing_in_all["id"]
 
+        # Если книга не найдена, создаем новую
+        logger.info(f"Создание новой книги: {book_name}")
         payload = {
             "name": book_name,
             "description": f"Авто-создано {datetime.now().strftime('%Y-%m-%d %H:%M')}",
@@ -114,8 +147,11 @@ def create_or_get_book_in_shelf(
             return None
 
         book_id = resp.json()["id"]
+        logger.info(f"Создана новая книга: ID {book_id}")
 
-        current_book_ids = [b["id"] for b in books]
+        # Добавляем книгу в полку
+        shelf_books = get_books_in_shelf(base_url, headers, shelf_id) or []
+        current_book_ids = [b["id"] for b in shelf_books]
         if book_id not in current_book_ids:
             current_book_ids.append(book_id)
             update_resp = requests.put(
@@ -125,9 +161,13 @@ def create_or_get_book_in_shelf(
                 timeout=30,
             )
             if update_resp.status_code != 200:
-                logger.warning(f"Не удалось обновить полку: {update_resp.text}")
+                logger.error(
+                    f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось добавить книгу в полку: {update_resp.text}"
+                )
+                # Но все равно возвращаем ID книги - она создана, просто не в полке
 
         return book_id
+
     except Exception as e:
         logger.exception(f"Исключение в create_or_get_book_in_shelf: {e}")
         return None
@@ -138,29 +178,81 @@ def create_or_get_chapter(
     base_url: str, headers: dict, book_id: int, chapter_name: str
 ) -> int | None:
     try:
+        logger.info(f"Поиск/создание главы '{chapter_name}' в книге {book_id}")
+
+        # Сначала пытаемся найти главу в указанной книге
         resp = requests.get(
-            f"{base_url}/api/chapters?book_id={book_id}", headers=headers, timeout=30
+            f"{base_url}/api/chapters?book_id={book_id}",
+            headers=_api_headers(headers),
+            timeout=30,
         )
         if not resp.ok:
-            logger.error(f"Ошибка получения глав: {resp.text}")
+            logger.error(f"Ошибка получения глав для книги {book_id}: {resp.text}")
             return None
+
         chapters = resp.json().get("data", [])
-        existing = next((c for c in chapters if c["name"] == chapter_name), None)
+        logger.info(f"Найдено глав в книге {book_id}: {len(chapters)}")
+
+        # Ищем главу по имени
+        existing = None
+        for chapter in chapters:
+            if chapter.get("name") == chapter_name:
+                existing = chapter
+                break
+
+        if existing:
+            existing_id = existing["id"]
+            existing_book_id = existing.get("book_id")
+            logger.info(
+                f"Найдена существующая глава '{chapter_name}' в книге {book_id}: ID {existing_id} (принадлежит книге {existing_book_id})"
+            )
+
+            # Дополнительная проверка: убедимся, что глава действительно принадлежит указанной книге
+            if existing_book_id != book_id:
+                logger.warning(
+                    f"НЕСООТВЕТСТВИЕ: Глава {existing_id} принадлежит книге {existing_book_id}, а не {book_id}. Игнорируем."
+                )
+                existing = None
+
         if existing:
             return existing["id"]
 
+        # Если глава не найдена в указанной книге, создаем новую
+        logger.info(f"Создание новой главы '{chapter_name}' в книге {book_id}")
         payload = {
             "book_id": book_id,
             "name": chapter_name,
             "description": f"Авто-создано {datetime.now().strftime('%Y-%m-%d')}",
         }
+
         resp = requests.post(
-            f"{base_url}/api/chapters", headers=headers, json=payload, timeout=30
+            f"{base_url}/api/chapters",
+            headers=_api_headers(headers),
+            json=payload,
+            timeout=30,
         )
+
         if resp.ok:
-            return resp.json()["id"]
-        logger.error(f"Ошибка создания главы: {resp.text}")
+            new_chapter_data = resp.json()
+            new_chapter_id = new_chapter_data["id"]
+            new_chapter_book_id = new_chapter_data.get("book_id")
+
+            logger.info(
+                f"Создана новая глава: ID {new_chapter_id} в книге {new_chapter_book_id}"
+            )
+
+            # Проверяем, что глава создана в правильной книге
+            if new_chapter_book_id != book_id:
+                logger.error(
+                    f"ОШИБКА: Глава создана в книге {new_chapter_book_id} вместо {book_id}!"
+                )
+                return None
+
+            return new_chapter_id
+
+        logger.error(f"Ошибка создания главы: {resp.status_code} - {resp.text}")
         return None
+
     except Exception as e:
         logger.exception(f"Ошибка в create_or_get_chapter: {e}")
         return None
@@ -196,9 +288,123 @@ def upload_md_with_images(
                 tagger = SmartTagger()
                 raw_tags = tagger.get_document_tags(md_path, md_content)
                 tags_for_api = [{"name": t, "value": ""} for t in raw_tags]
+                if log_callback:
+                    log_callback(f"Теги: {', '.join(raw_tags)}", "gray")
             except Exception as e:
                 if log_callback:
                     log_callback(f"Тегирование не удалось: {e}", "orange")
+
+        # === КРИТИЧЕСКИ ВАЖНО: Обработка главы ===
+        final_chapter_id = None
+        chapter_name = None
+
+        if chapter_id:
+            # Получаем информацию о главе
+            chapter_resp = requests.get(
+                f"{base_url}/api/chapters/{chapter_id}",
+                headers=_api_headers(headers),
+                timeout=30,
+            )
+            if chapter_resp.ok:
+                chapter_data = chapter_resp.json()
+                chapter_book_id = chapter_data.get("book_id")
+                chapter_name = chapter_data.get("name", "Unknown")
+
+                if chapter_book_id != book_id:
+                    if log_callback:
+                        log_callback(
+                            f"Глава '{chapter_name}' принадлежит книге ID {chapter_book_id}, а не выбранной книге ID {book_id}",
+                            "orange",
+                        )
+                        log_callback(
+                            f"Создаем новую главу '{chapter_name}' в выбранной книге",
+                            "blue",
+                        )
+
+                    # Создаем новую главу с тем же именем в нужной книге
+                    new_chapter_id = create_or_get_chapter(
+                        base_url, headers, book_id, chapter_name
+                    )
+                    if new_chapter_id:
+                        # НЕМЕДЛЕННАЯ ПРОВЕРКА новой главы
+                        verify_resp = requests.get(
+                            f"{base_url}/api/chapters/{new_chapter_id}",
+                            headers=_api_headers(headers),
+                            timeout=30,
+                        )
+                        if verify_resp.ok:
+                            verify_data = verify_resp.json()
+                            verify_book_id = verify_data.get("book_id")
+                            if verify_book_id == book_id:
+                                final_chapter_id = new_chapter_id
+                                if log_callback:
+                                    log_callback(
+                                        f"✅ Создана новая глава ID: {new_chapter_id} в книге {book_id}",
+                                        "green",
+                                    )
+                            else:
+                                if log_callback:
+                                    log_callback(
+                                        f"❌ Новая глава создана в неправильной книге {verify_book_id} вместо {book_id}",
+                                        "red",
+                                    )
+                                final_chapter_id = None
+                        else:
+                            if log_callback:
+                                log_callback(
+                                    f"❌ Не удалось проверить созданную главу", "red"
+                                )
+                            final_chapter_id = None
+                    else:
+                        if log_callback:
+                            log_callback(
+                                f"❌ Не удалось создать главу в выбранной книге. Загружаем без главы.",
+                                "red",
+                            )
+                else:
+                    final_chapter_id = chapter_id
+                    if log_callback:
+                        log_callback(
+                            f"✅ Глава '{chapter_name}' принадлежит выбранной книге",
+                            "green",
+                        )
+            else:
+                if log_callback:
+                    log_callback(
+                        f"⚠️ Не удалось получить информацию о главе {chapter_id}. Загружаем без главы.",
+                        "orange",
+                    )
+
+        # === ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: убедимся, что final_chapter_id принадлежит правильной книге ===
+        if final_chapter_id:
+            verify_resp = requests.get(
+                f"{base_url}/api/chapters/{final_chapter_id}",
+                headers=_api_headers(headers),
+                timeout=30,
+            )
+            if verify_resp.ok:
+                verify_data = verify_resp.json()
+                verify_book_id = verify_data.get("book_id")
+                if verify_book_id != book_id:
+                    if log_callback:
+                        log_callback(
+                            f"ОШИБКА ВЕРИФИКАЦИИ: Глава ID {final_chapter_id} принадлежит книге {verify_book_id} вместо {book_id}",
+                            "red",
+                        )
+                    final_chapter_id = None
+            else:
+                if log_callback:
+                    log_callback(
+                        f"Не удалось проверить главу ID {final_chapter_id}", "orange"
+                    )
+                final_chapter_id = None
+
+        if log_callback:
+            log_callback(f"Создание страницы в книге ID: {book_id}", "#00ffff")
+            if final_chapter_id:
+                log_callback(f"В главе ID: {final_chapter_id}", "#00ffff")
+            else:
+                log_callback(f"Без главы", "#00ffff")
 
         payload = {
             "name": page_name,
@@ -208,8 +414,14 @@ def upload_md_with_images(
             "draft": False,
             "tags": tags_for_api,
         }
-        if chapter_id:
-            payload["chapter_id"] = chapter_id
+        if final_chapter_id:
+            payload["chapter_id"] = final_chapter_id
+
+        if log_callback:
+            log_callback(
+                f"Payload: книга={book_id}, имя={page_name}, глава={final_chapter_id}",
+                "gray",
+            )
 
         resp = requests.post(
             f"{base_url}/api/pages",
@@ -217,16 +429,51 @@ def upload_md_with_images(
             json=payload,
             timeout=30,
         )
+
         if not resp.ok:
-            error_msg = f"Ошибка создания страницы: {resp.text}"
+            error_msg = f"Ошибка создания страницы: {resp.status_code} - {resp.text}"
             if log_callback:
                 log_callback(error_msg, "red")
             logger.error(error_msg)
             return False
 
-        page_id = resp.json()["id"]
+        page_data = resp.json()
+        page_id = page_data["id"]
+        actual_book_id = page_data.get("book_id")
+
+        # Финальная проверка
+        if actual_book_id != book_id:
+            error_msg = f"КРИТИЧЕСКАЯ ОШИБКА: BookStack API проигнорировал book_id! Страница создана в книге ID {actual_book_id} вместо {book_id}!"
+            if log_callback:
+                log_callback(error_msg, "red")
+            logger.error(error_msg)
+
+            # Пытаемся удалить неправильно созданную страницу
+            try:
+                delete_resp = requests.delete(
+                    f"{base_url}/api/pages/{page_id}",
+                    headers=_api_headers(headers),
+                    timeout=30,
+                )
+                if delete_resp.ok:
+                    log_callback(
+                        f"Удалена неправильно созданная страница ID {page_id}", "orange"
+                    )
+                else:
+                    log_callback(
+                        f"Не удалось удалить неправильную страницу: {delete_resp.text}",
+                        "orange",
+                    )
+            except Exception as e:
+                log_callback(
+                    f"Ошибка при удалении неправильной страницы: {e}", "orange"
+                )
+
+            return False
+
         if log_callback:
-            log_callback(f"Создана страница: {page_name}", "blue")
+            log_callback(f"Создана страница: {page_name} (ID: {page_id})", "green")
+            log_callback(f"Успешно в книге ID: {actual_book_id}", "green")
 
         # === Изображения ===
         local_images = []
@@ -263,9 +510,7 @@ def upload_md_with_images(
                     data = {"type": "gallery", "uploaded_to": page_id}
                     gallery_resp = requests.post(
                         f"{base_url}/api/image-gallery",
-                        headers={
-                            "Authorization": headers["Authorization"]
-                        },  # Gallery API требует только Authorization
+                        headers={"Authorization": headers["Authorization"]},
                         files=files,
                         data=data,
                         timeout=30,
@@ -327,7 +572,7 @@ def upload_md_with_images(
 
         if update_resp.ok:
             if log_callback:
-                log_callback(f"Обновлено: {uploaded}/{total} изображений", "blue")
+                log_callback(f"Обновлено: {uploaded}/{total} изображений", "#00ffff")
             return True
         else:
             error_msg = f"Ошибка обновления страницы: {update_resp.text}"

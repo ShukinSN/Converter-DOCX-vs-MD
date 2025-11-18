@@ -1,39 +1,40 @@
 import os
 import sys
 import subprocess
-import tempfile
 import re
 import zipfile
-from PyQt5.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QPushButton,
-    QProgressBar,
-    QTextEdit,
-    QFileDialog,
-    QMessageBox,
-    QGroupBox,
-    QCheckBox,
-    QTabWidget,
-    QListWidget,
-    QListWidgetItem,
-    QAction,
-    QActionGroup,
-    QMenu,
-    QApplication,
-)
+from pathlib import Path
+
 from PyQt5.QtCore import Qt, QSettings, QTimer
 from PyQt5.QtGui import QFont, QTextCursor
+from PyQt5.QtWidgets import (
+    QApplication,
+    QAbstractItemView,
+    QAction,
+    QActionGroup,
+    QCheckBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QProgressBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
 from converter.converter_thread import EnhancedConverterThread
 from converter.utils import sanitize_filename
-from gui.preview_window import ModernPreviewWindow
 from gui.bookstack_widget import BookStackWidget
-from tagger.smart_tagger import SmartTagger
-from pathlib import Path
 import pypandoc
 
 
@@ -43,28 +44,28 @@ class DocxToMarkdownConverter(QMainWindow):
     def __init__(self):
         super().__init__()
         self.thread = None
-        self.preview_window = None
         self.settings = QSettings("DOCX2MD", "EnhancedConverter")
         self.converted_files = {}  # {chapter_name: [md_paths]}
+
         self.init_ui()
         self.load_settings()
         QTimer.singleShot(100, self.check_pandoc_installation)
 
+    # --------------------------------------------------------------------- #
+    #   Инициализация интерфейса
+    # --------------------------------------------------------------------- #
     def init_ui(self):
-        """Инициализация пользовательского интерфейса."""
         self.setWindowTitle("DOCX to Markdown Converter")
-        self.setGeometry(100, 100, 900, 700)
+        self.setGeometry(100, 100, 1150, 700)
 
-        # === МЕНЮ: ТЕМЫ ===
+        # === Меню: Темы ===
         menubar = self.menuBar()
         theme_menu = menubar.addMenu("Тема")
 
-        self.dark_theme_action = QAction("Тёмная тема", self)
-        self.dark_theme_action.setCheckable(True)
+        self.dark_theme_action = QAction("Тёмная тема", self, checkable=True)
         self.dark_theme_action.triggered.connect(lambda: self.change_theme("dark"))
 
-        self.light_theme_action = QAction("Светлая тема", self)
-        self.light_theme_action.setCheckable(True)
+        self.light_theme_action = QAction("Светлая тема", self, checkable=True)
         self.light_theme_action.triggered.connect(lambda: self.change_theme("light"))
 
         theme_group = QActionGroup(self)
@@ -75,99 +76,109 @@ class DocxToMarkdownConverter(QMainWindow):
         theme_menu.addAction(self.dark_theme_action)
         theme_menu.addAction(self.light_theme_action)
 
-        # === ЦЕНТРАЛЬНЫЙ ВИДЖЕТ ===
+        # === Центральный виджет ===
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(12)
 
         self.tab_widget = QTabWidget()
-        layout.addWidget(self.tab_widget)
+        main_layout.addWidget(self.tab_widget)
 
-        # === ВКЛАДКА: КОНВЕРТАЦИЯ ===
-        conversion_widget = QWidget()
-        conversion_layout = QVBoxLayout(conversion_widget)
-        conversion_layout.setSpacing(12)
+        # === Вкладка: Конвертация ===
+        conversion_tab = QWidget()
+        conv_layout = QVBoxLayout(conversion_tab)
+        conv_layout.setSpacing(12)
 
-        # --- Файлы ---
-        file_group = QGroupBox("Документы для конвертации")
-        file_layout = QHBoxLayout()
-        self.file_list = QListWidget()
-        self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
-        file_layout.addWidget(self.file_list)
+        # --- Группа: Документы для конвертации ---
+        files_group = QGroupBox("Документы для конвертации")
+        files_main_layout = QHBoxLayout()
+        files_main_layout.setSpacing(12)
 
-        button_layout = QVBoxLayout()
+        # Таблица файлов
+        files_table_layout = QVBoxLayout()
+        self.file_table = QTableWidget(0, 4)
+        self.file_table.setHorizontalHeaderLabels(
+            ["", "Заголовок", "Приложение", "Буква"]
+        )
+        self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
+        self.file_table.setColumnWidth(0, 30)
+        self.file_table.setColumnWidth(2, 80)
+        self.file_table.setColumnWidth(3, 60)
+        self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.file_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.file_table.itemChanged.connect(self.on_item_changed)
+
+        files_table_layout.addWidget(self.file_table)
+        files_main_layout.addLayout(files_table_layout, stretch=1)
+
+        # Кнопки управления (справа, в столбик)
+        buttons_column = QVBoxLayout()
+        buttons_column.setSpacing(8)
+
         self.add_files_btn = QPushButton("Добавить файлы")
         self.add_files_btn.clicked.connect(self.add_files)
+
         self.add_folder_btn = QPushButton("Добавить папку")
         self.add_folder_btn.clicked.connect(self.add_folder)
+
         self.remove_btn = QPushButton("Удалить выбранное")
         self.remove_btn.clicked.connect(self.remove_selected)
+
         self.clear_btn = QPushButton("Очистить список")
         self.clear_btn.clicked.connect(self.clear_list)
 
-        button_layout.addWidget(self.add_files_btn)
-        button_layout.addWidget(self.add_folder_btn)
-        button_layout.addWidget(self.remove_btn)
-        button_layout.addWidget(self.clear_btn)
-        button_layout.addStretch()
-        file_layout.addLayout(button_layout)
-        file_group.setLayout(file_layout)
+        for btn in (
+            self.add_files_btn,
+            self.add_folder_btn,
+            self.remove_btn,
+            self.clear_btn,
+        ):
+            buttons_column.addWidget(btn)
 
-        # --- Настройки ---
+        buttons_column.addStretch()
+        files_main_layout.addLayout(buttons_column, stretch=0)
+        files_group.setLayout(files_main_layout)
+
+        # --- Группа: Настройки конвертации ---
         settings_group = QGroupBox("Настройки конвертации")
-        self.overwrite_cb = QCheckBox("Перезаписывать существующие файлы")
-        self.preserve_tabs_cb = QCheckBox("Сохранять табуляцию")
-        self.appendix_cb = QCheckBox("Приложение")
-        self.appendix_letter_label = QLabel("Буква:")
-        self.appendix_letter_edit = QLineEdit()
-        self.appendix_letter_edit.setMaxLength(2)
-        self.appendix_letter_edit.setFixedWidth(50)
-        self.appendix_letter_edit.setEnabled(False)
-
-        self.appendix_cb.stateChanged.connect(self.toggle_appendix_letter)
-        self.appendix_cb.stateChanged.connect(self.handle_appendix_toggle)
-
         settings_layout = QVBoxLayout()
         settings_layout.setSpacing(6)
+
+        self.overwrite_cb = QCheckBox("Перезаписывать существующие файлы")
+        self.preserve_tabs_cb = QCheckBox("Сохранять табуляцию")
+
         settings_layout.addWidget(self.overwrite_cb)
         settings_layout.addWidget(self.preserve_tabs_cb)
-
-        appendix_row = QHBoxLayout()
-        appendix_row.setSpacing(6)
-        appendix_row.addWidget(self.appendix_cb)
-        appendix_row.addWidget(self.appendix_letter_label)
-        appendix_row.addWidget(self.appendix_letter_edit)
-        appendix_row.addStretch()
-        settings_layout.addLayout(appendix_row)
         settings_group.setLayout(settings_layout)
 
-        # --- Папка вывода ---
+        # --- Группа: Папка вывода ---
         output_group = QGroupBox("Папка для сохранения")
+        output_layout = QHBoxLayout()
+        output_layout.setSpacing(6)
+
         self.output_path_edit = QLineEdit()
         self.browse_btn = QPushButton("Обзор...")
         self.open_folder_btn = QPushButton("Открыть папку")
         self.open_folder_btn.setEnabled(False)
 
-        output_layout = QHBoxLayout()
-        output_layout.setSpacing(6)
         output_layout.addWidget(self.output_path_edit)
         output_layout.addWidget(self.browse_btn)
         output_layout.addWidget(self.open_folder_btn)
         output_group.setLayout(output_layout)
 
         # --- Кнопки конвертации ---
-        convert_buttons_layout = QHBoxLayout()
-        convert_buttons_layout.setSpacing(8)
-        convert_buttons_layout.addStretch()
+        convert_btns_layout = QHBoxLayout()
+        convert_btns_layout.addStretch()
         self.convert_btn = QPushButton("Начать конвертацию")
         self.convert_btn.clicked.connect(self.start_conversion)
         self.cancel_btn = QPushButton("Отмена")
         self.cancel_btn.clicked.connect(self.cancel_conversion)
         self.cancel_btn.setEnabled(False)
-        convert_buttons_layout.addWidget(self.convert_btn)
-        convert_buttons_layout.addWidget(self.cancel_btn)
+        convert_btns_layout.addWidget(self.convert_btn)
+        convert_btns_layout.addWidget(self.cancel_btn)
 
         # --- Прогресс и лог ---
         self.progress = QProgressBar()
@@ -180,24 +191,23 @@ class DocxToMarkdownConverter(QMainWindow):
         self.log.setReadOnly(True)
         self.log.setFont(QFont("Consolas", 9))
 
-        # --- Сигналы ---
+        # --- Подключение сигналов ---
         self.browse_btn.clicked.connect(self.browse_output)
         self.open_folder_btn.clicked.connect(self.open_output_folder)
         self.output_path_edit.textChanged.connect(self.update_open_folder_btn_state)
-        self.file_list.itemSelectionChanged.connect(self.on_file_selected)
 
-        # --- Добавляем в layout ---
-        conversion_layout.addWidget(file_group)
-        conversion_layout.addWidget(settings_group)
-        conversion_layout.addWidget(output_group)
-        conversion_layout.addLayout(convert_buttons_layout)
-        conversion_layout.addWidget(self.progress)
-        conversion_layout.addWidget(log_label)
-        conversion_layout.addWidget(self.log)
+        # --- Добавление в layout ---
+        conv_layout.addWidget(files_group)
+        conv_layout.addWidget(settings_group)
+        conv_layout.addWidget(output_group)
+        conv_layout.addLayout(convert_btns_layout)
+        conv_layout.addWidget(self.progress)
+        conv_layout.addWidget(log_label)
+        conv_layout.addWidget(self.log)
 
-        self.tab_widget.addTab(conversion_widget, "Конвертация")
+        self.tab_widget.addTab(conversion_tab, "Конвертация")
 
-        # === ВКЛАДКА: BOOKSTACK ===
+        # === Вкладка: BookStack ===
         self.bookstack_widget = BookStackWidget(
             self,
             self.converted_files,
@@ -210,37 +220,15 @@ class DocxToMarkdownConverter(QMainWindow):
         self.change_theme("dark")
 
     # --------------------------------------------------------------------- #
-    #   ТЕМЫ
-    # --------------------------------------------------------------------- #
-    def change_theme(self, theme):
-        from gui.palette import DarkPalette, LightPalette
-
-        if theme == "light":
-            LightPalette.apply(QApplication.instance())
-            self.light_theme_action.setChecked(True)
-            self.dark_theme_action.setChecked(False)
-        else:
-            DarkPalette.apply(QApplication.instance())
-            self.dark_theme_action.setChecked(True)
-            self.light_theme_action.setChecked(False)
-        self.settings.setValue("theme", theme)
-
-    # --------------------------------------------------------------------- #
-    #   ДОБАВЛЕНИЕ ФАЙЛОВ / ПАПОК
+    #   Добавление файлов
     # --------------------------------------------------------------------- #
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
             self, "Выберите DOCX файлы", "", "DOCX Files (*.docx)"
         )
         for file in files:
-            if file not in [
-                self.file_list.item(i).data(Qt.UserRole)
-                for i in range(self.file_list.count())
-            ]:
-                item = QListWidgetItem(Path(file).name)
-                item.setData(Qt.UserRole, file)
-                item.setData(Qt.UserRole + 1, None)
-                self.file_list.addItem(item)
+            if not self.file_exists_in_table(file):
+                self.add_file_row(file, None)
 
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Выберите папку")
@@ -248,53 +236,84 @@ class DocxToMarkdownConverter(QMainWindow):
             return
         base_folder = Path(folder)
         for file_path in base_folder.rglob("*.docx"):
-            if str(file_path) not in [
-                self.file_list.item(i).data(Qt.UserRole)
-                for i in range(self.file_list.count())
-            ]:
-                item = QListWidgetItem(file_path.name)
-                item.setData(Qt.UserRole, str(file_path))
-                item.setData(Qt.UserRole + 1, str(base_folder))
-                self.file_list.addItem(item)
+            if not self.file_exists_in_table(str(file_path)):
+                self.add_file_row(str(file_path), str(base_folder))
 
+    def file_exists_in_table(self, file_path: str) -> bool:
+        for row in range(self.file_table.rowCount()):
+            item = self.file_table.item(row, 1)
+            if item and item.data(Qt.UserRole) == file_path:
+                return True
+        return False
+
+    def add_file_row(self, file_path: str, base_folder: str | None):
+        row = self.file_table.rowCount()
+        self.file_table.insertRow(row)
+
+        # 0: Чекбокс удаления
+        del_cb = QTableWidgetItem()
+        del_cb.setCheckState(Qt.Unchecked)
+        del_cb.setData(Qt.UserRole, file_path)
+        self.file_table.setItem(row, 0, del_cb)
+
+        # 1: Имя файла
+        name_item = QTableWidgetItem(Path(file_path).name)
+        name_item.setData(Qt.UserRole, file_path)
+        name_item.setData(Qt.UserRole + 1, base_folder)
+        self.file_table.setItem(row, 1, name_item)
+
+        # 2: Чекбокс "Приложение"
+        app_cb = QTableWidgetItem()
+        app_cb.setCheckState(Qt.Unchecked)
+        app_cb.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+        self.file_table.setItem(row, 2, app_cb)
+
+        # 3: Поле буквы
+        letter_edit = QLineEdit()
+        letter_edit.setMaxLength(2)
+        letter_edit.setFixedWidth(50)
+        letter_edit.setEnabled(False)
+        letter_edit.setText("А")
+        letter_edit.textChanged.connect(lambda: self.on_letter_changed(row))
+        self.file_table.setCellWidget(row, 3, letter_edit)
+
+    def on_item_changed(self, item):
+        if item.column() == 2:  # Чекбокс "Приложение"
+            row = item.row()
+            enabled = item.checkState() == Qt.Checked
+            letter_edit = self.file_table.cellWidget(row, 3)
+            if letter_edit:
+                letter_edit.setEnabled(enabled)
+                if enabled and not letter_edit.text().strip():
+                    letter_edit.setText("А")
+
+    def on_letter_changed(self, row: int):
+        letter_edit = self.file_table.cellWidget(row, 3)
+        text = letter_edit.text().strip().upper()
+        if text and len(text) > 1:
+            text = text[0]
+        letter_edit.setText(text)
+
+    # --------------------------------------------------------------------- #
+    #   Удаление
+    # --------------------------------------------------------------------- #
     def remove_selected(self):
-        for item in self.file_list.selectedItems():
-            self.file_list.takeItem(self.file_list.row(item))
+        rows_to_remove = [
+            row
+            for row in range(self.file_table.rowCount())
+            if self.file_table.item(row, 0).checkState() == Qt.Checked
+        ]
+        for row in sorted(rows_to_remove, reverse=True):
+            self.file_table.removeRow(row)
 
     def clear_list(self):
-        self.file_list.clear()
-
-    def browse_output(self):
-        folder = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения")
-        if folder:
-            self.output_path_edit.setText(folder)
+        self.file_table.setRowCount(0)
 
     # --------------------------------------------------------------------- #
-    #   ПРЕДПРОСМОТР
-    # --------------------------------------------------------------------- #
-    def on_file_selected(self):
-        if not self.file_list.selectedItems():
-            return
-        selected_item = self.file_list.selectedItems()[0]
-        file_path = selected_item.data(Qt.UserRole)
-        if self.preview_window:
-            self.preview_window.close()
-        self.preview_window = ModernPreviewWindow(self)
-        try:
-            with zipfile.ZipFile(file_path) as z:
-                xml = z.read("word/document.xml").decode("utf-8")
-                text = " ".join(re.findall(r"<w:t>(.*?)</w:t>", xml, re.DOTALL))[:500]
-            self.preview_window.set_content(text)
-            self.preview_window.show()
-        except Exception as e:
-            self.preview_window.set_content(f"Ошибка предпросмотра: {str(e)}")
-            self.preview_window.show()
-
-    # --------------------------------------------------------------------- #
-    #   КОНВЕРТАЦИЯ
+    #   Конвертация
     # --------------------------------------------------------------------- #
     def start_conversion(self):
-        if not self.file_list.count():
+        if self.file_table.rowCount() == 0:
             QMessageBox.warning(self, "Ошибка", "Нет файлов для конвертации")
             return
 
@@ -303,49 +322,36 @@ class DocxToMarkdownConverter(QMainWindow):
             QMessageBox.warning(self, "Ошибка", "Укажите папку для сохранения")
             return
 
-        if not os.path.isdir(output_path):
-            try:
-                os.makedirs(output_path)
-            except Exception as e:
-                QMessageBox.critical(
-                    self, "Ошибка", f"Не удалось создать папку: {str(e)}"
-                )
-                return
+        os.makedirs(output_path, exist_ok=True)
 
-        files_with_bases = [
-            (
-                self.file_list.item(i).data(Qt.UserRole),
-                self.file_list.item(i).data(Qt.UserRole + 1),
-            )
-            for i in range(self.file_list.count())
-        ]
-
+        files_with_meta = []
         chapter_groups = {}
-        for full_path, base_folder in files_with_bases:
-            if full_path and base_folder:
-                chapter_name = Path(base_folder).name
-                chapter_groups.setdefault(chapter_name, []).append(
-                    (full_path, base_folder)
-                )
-            else:
-                chapter_groups.setdefault("NoChapter", []).append(
-                    (full_path, base_folder)
-                )
+
+        for row in range(self.file_table.rowCount()):
+            name_item = self.file_table.item(row, 1)
+            app_item = self.file_table.item(row, 2)
+            letter_edit = self.file_table.cellWidget(row, 3)
+
+            file_path = name_item.data(Qt.UserRole)
+            base_folder = name_item.data(Qt.UserRole + 1)
+            is_appendix = app_item.checkState() == Qt.Checked
+            appendix_letter = letter_edit.text().upper() if is_appendix else "А"
+
+            meta = (file_path, base_folder, is_appendix, appendix_letter)
+            files_with_meta.append(meta)
+
+            chapter_name = Path(base_folder).name if base_folder else "NoChapter"
+            chapter_groups.setdefault(chapter_name, []).append(meta)
 
         options = {
             "overwrite": self.overwrite_cb.isChecked(),
             "preserve_tabs": self.preserve_tabs_cb.isChecked(),
             "toc": False,
-            "appendix": self.appendix_cb.isChecked(),
-            "appendix_letter": (
-                self.appendix_letter_edit.text().upper()
-                if self.appendix_cb.isChecked()
-                else "А"
-            ),
+            "appendix": False,
         }
 
         self.thread = EnhancedConverterThread(
-            files_with_bases, output_path, options, Path(__file__).parent.parent
+            files_with_meta, output_path, options, Path(__file__).parent.parent
         )
         self.thread.chapter_groups = chapter_groups
         self.thread.progress_updated.connect(self.update_progress)
@@ -358,27 +364,27 @@ class DocxToMarkdownConverter(QMainWindow):
         self.progress.setValue(0)
         self.progress.setFormat("Инициализация...")
         self.log.clear()
-
         self.thread.start()
 
-    def update_progress(self, value, filename):
+    def update_progress(self, value: int, filename: str):
         self.progress.setValue(value)
         self.progress.setFormat(f"{filename} — {value}%")
 
-    def log_result(self, filename, message, output_path):
+    def log_result(self, filename: str, message: str, output_path: str | None):
+        color = "green" if output_path else "red"
+        self.log.append(f"<font color='{color}'>{message}</font>")
         if output_path:
-            self.log.append(f"<font color='green'>{message}</font>")
             self.log.append(f"<font color='gray'>Сохранено в: {output_path}</font><br>")
         else:
-            self.log.append(f"<font color='red'>{message}</font><br>")
+            self.log.append("<br>")
         self.log.moveCursor(QTextCursor.End)
 
-    def log_error(self, message):
+    def log_error(self, message: str):
         self.log.append(f"<font color='red'>{message}</font><br>")
         self.log.moveCursor(QTextCursor.End)
 
-    def finalize_conversion(self, success_count):
-        total = self.file_list.count()
+    def finalize_conversion(self, success_count: int):
+        total = self.file_table.rowCount()
         self.progress.setFormat(f"Готово! Успешно: {success_count}/{total}")
         self.progress.setValue(100)
         self.convert_btn.setEnabled(True)
@@ -387,26 +393,20 @@ class DocxToMarkdownConverter(QMainWindow):
         if success_count == 0:
             return
 
-        self.converted_files = {}
         output_root = Path(self.output_path_edit.text())
-
-        # Проверяем: есть ли хоть одна папка в списке?
         has_folders = any(
-            self.file_list.item(i).data(Qt.UserRole + 1) is not None
-            for i in range(self.file_list.count())
+            self.file_table.item(r, 1).data(Qt.UserRole + 1) is not None
+            for r in range(self.file_table.rowCount())
         )
 
+        self.converted_files = {}
         for chapter_name, files in self.thread.chapter_groups.items():
             md_paths = []
-            for fp in files:
-                input_path = Path(fp[0])
-                base_folder = Path(fp[1]) if fp[1] else None
-
-                # Определяем относительную папку
+            for file_path, base_folder, _, _ in files:
+                input_path = Path(file_path)
                 rel_dir = Path()
-                if base_folder and input_path.parent != base_folder:
+                if base_folder and input_path.parent != Path(base_folder):
                     rel_dir = input_path.parent.relative_to(base_folder)
-
                 md_path = (
                     output_root / rel_dir / f"{sanitize_filename(input_path.stem)}.md"
                 )
@@ -416,38 +416,28 @@ class DocxToMarkdownConverter(QMainWindow):
             if not md_paths:
                 continue
 
-            # === КЛЮЧЕВАЯ ЛОГИКА ===
             if has_folders:
-                # Используем имена папок как главы
-                real_chapter_name = (
-                    chapter_name if chapter_name != "NoChapter" else "Без главы"
-                )
-                self.converted_files[real_chapter_name] = md_paths
+                name = chapter_name if chapter_name != "NoChapter" else "Без главы"
+                self.converted_files[name] = md_paths
             else:
-                # Если добавлены только отдельные файлы — НЕ создаём главы!
-                # Всё идёт в корень книги → просто список файлов
-                self.converted_files = md_paths  # ← СПИСОК, а не dict!
-                break  # Больше ничего не добавляем
+                self.converted_files = md_paths
+                break
         else:
-            # Если has_folders == False и мы не вошли в break
-            if not has_folders and self.converted_files == {}:
-                # Все файлы — отдельные, без папок
-                all_md_paths = []
-                for i in range(self.file_list.count()):
-                    full_path = self.file_list.item(i).data(Qt.UserRole)
-                    if full_path:
-                        input_path = Path(full_path)
+            if not has_folders and not self.converted_files:
+                md_paths = []
+                for row in range(self.file_table.rowCount()):
+                    item = self.file_table.item(row, 1)
+                    if item:
+                        input_path = Path(item.data(Qt.UserRole))
                         md_path = (
                             output_root / f"{sanitize_filename(input_path.stem)}.md"
                         )
                         if md_path.exists():
-                            all_md_paths.append(str(md_path))
-                self.converted_files = all_md_paths  # ← СПИСОК
+                            md_paths.append(str(md_path))
+                self.converted_files = md_paths
 
-        # Обновляем BookStack
         self.bookstack_widget.converted_files = self.converted_files
         self.bookstack_widget.update_file_list()
-
         QMessageBox.information(self, "Готово", f"Успешно: {success_count}/{total}")
 
     def cancel_conversion(self):
@@ -463,76 +453,67 @@ class DocxToMarkdownConverter(QMainWindow):
             self.cancel_btn.setEnabled(False)
 
     # --------------------------------------------------------------------- #
-    #   НАСТРОЙКИ
+    #   Настройки, темы, папка вывода
     # --------------------------------------------------------------------- #
+    def change_theme(self, theme: str):
+        from gui.palette import DarkPalette, LightPalette
+
+        palette = LightPalette if theme == "light" else DarkPalette
+        palette.apply(QApplication.instance())
+
+        self.light_theme_action.setChecked(theme == "light")
+        self.dark_theme_action.setChecked(theme == "dark")
+        self.settings.setValue("theme", theme)
+
+    def browse_output(self):
+        folder = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения")
+        if folder:
+            self.output_path_edit.setText(folder)
+
     def load_settings(self):
         self.output_path_edit.setText(self.settings.value("output_path", ""))
-        self.overwrite_cb.setChecked(self.settings.value("overwrite", False, type=bool))
+        self.overwrite_cb.setChecked(self.settings.value("overwrite", False, bool))
         self.preserve_tabs_cb.setChecked(
-            self.settings.value("preserve_tabs", False, type=bool)
+            self.settings.value("preserve_tabs", False, bool)
         )
-        self.appendix_cb.setChecked(self.settings.value("appendix", False, type=bool))
-        self.appendix_letter_edit.setText(self.settings.value("appendix_letter", "А"))
         self.update_open_folder_btn_state()
-
-        theme = self.settings.value("theme", "dark")
-        self.change_theme(theme)
+        self.change_theme(self.settings.value("theme", "dark"))
 
     def save_settings(self):
         self.settings.setValue("output_path", self.output_path_edit.text())
         self.settings.setValue("overwrite", self.overwrite_cb.isChecked())
         self.settings.setValue("preserve_tabs", self.preserve_tabs_cb.isChecked())
-        self.settings.setValue("appendix", self.appendix_cb.isChecked())
-        self.settings.setValue("appendix_letter", self.appendix_letter_edit.text())
-        self.settings.setValue("theme", self.settings.value("theme", "dark"))
+        self.settings.setValue(
+            "theme", "dark" if self.dark_theme_action.isChecked() else "light"
+        )
 
     def closeEvent(self, event):
         self.save_settings()
         if self.thread and self.thread.isRunning():
             self.thread.stop()
             self.thread.wait()
-        if self.preview_window and self.preview_window.isVisible():
-            self.preview_window.close()
         event.accept()
 
-    # --------------------------------------------------------------------- #
-    #   ПРИЛОЖЕНИЕ
-    # --------------------------------------------------------------------- #
-    def toggle_appendix_letter(self, state):
-        self.appendix_letter_edit.setEnabled(state == Qt.Checked)
-
-    def handle_appendix_toggle(self, state):
-        if state == Qt.Checked:
-            self.appendix_letter_edit.setFocus()
-
-    # --------------------------------------------------------------------- #
-    #   ПАПКА ВЫВОДА
-    # --------------------------------------------------------------------- #
     def update_open_folder_btn_state(self):
         path = self.output_path_edit.text()
         self.open_folder_btn.setEnabled(bool(path.strip() and os.path.isdir(path)))
 
     def open_output_folder(self):
         path = self.output_path_edit.text()
-        if os.path.isdir(path):
-            try:
-                if os.name == "nt":
-                    os.startfile(path)
-                elif os.name == "posix":
-                    if sys.platform == "darwin":
-                        subprocess.Popen(["open", path])
-                    else:
-                        subprocess.Popen(["xdg-open", path])
-            except Exception as e:
-                QMessageBox.warning(
-                    self, "Ошибка", f"Не удалось открыть папку:\n{str(e)}"
-                )
-        else:
+        if not os.path.isdir(path):
             QMessageBox.warning(self, "Ошибка", "Указанная папка не существует")
+            return
 
-    # --------------------------------------------------------------------- #
-    #   ПРОВЕРКА PANDOC
-    # --------------------------------------------------------------------- #
+        try:
+            if os.name == "nt":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Не удалось открыть папку:\n{str(e)}")
+
     def check_pandoc_installation(self):
         try:
             version = pypandoc.get_pandoc_version()
@@ -546,5 +527,6 @@ class DocxToMarkdownConverter(QMainWindow):
             QMessageBox.critical(
                 self,
                 "Ошибка",
-                "Pandoc не установлен или не найден в PATH. Установите с https://pandoc.org/installing.html",
+                "Pandoc не установлен или не найден в PATH.\n"
+                "Установите с https://pandoc.org/installing.html",
             )
