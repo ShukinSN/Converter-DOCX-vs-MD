@@ -1,7 +1,8 @@
+# converter/converter_thread.py
 import os
+import re
 import shutil
 import tempfile
-import zipfile
 from pathlib import Path
 from PyQt5.QtCore import QThread, pyqtSignal
 import pypandoc
@@ -18,11 +19,11 @@ from .utils import (
 
 class EnhancedConverterThread(QThread):
     progress_updated = pyqtSignal(int, str)
-    conversion_finished = pyqtSignal(str, str, str)
+    conversion_finished = pyqtSignal(str, str, str)  # filename, message, output_path
     finished_all = pyqtSignal(int)
     error_occurred = pyqtSignal(str)
 
-    RUSSIAN_LETTERS = "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЭЮЯ"
+    RUSSIAN_LETTERS = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
 
     def __init__(self, files, output_folder, options, project_root):
         super().__init__()
@@ -31,9 +32,8 @@ class EnhancedConverterThread(QThread):
         self.project_root = Path(project_root)
         self._is_running = True
         self.successful_files = []
-        self.chapter_groups = {}
 
-        # === БЕЗОПАСНАЯ НОРМАЛИЗАЦИЯ ===
+        # === Нормализация входных данных: поддержка (path, base_folder, is_appendix, letter) ===
         self.files_with_meta = []
         for item in files:
             if isinstance(item, str):
@@ -44,22 +44,18 @@ class EnhancedConverterThread(QThread):
             elif len(item) == 4:
                 self.files_with_meta.append(list(item))
             else:
-                raise ValueError(f"Неподдерживаемый формат: {item}")
+                raise ValueError(f"Неподдерживаемый формат элемента: {item}")
 
-        # Автоматическое назначение букв (теперь безопасно!)
+        # Автоматическое назначение букв для приложений
         self._assign_appendix_letters()
 
     def _assign_appendix_letters(self):
-        """Безопасно назначает буквы приложениям."""
-        appendix_indices = [
-            i
-            for i, meta in enumerate(self.files_with_meta)
-            if meta[2]  # is_appendix == True
-        ]
+        """Безопасно назначает буквы приложениям, если они не заданы вручную."""
+        appendix_indices = [i for i, meta in enumerate(self.files_with_meta) if meta[2]]
 
         for pos, idx in enumerate(appendix_indices):
             if self.files_with_meta[idx][3].strip():
-                continue  # уже есть буква
+                continue  # буква уже указана вручную
 
             letter_index = pos % len(self.RUSSIAN_LETTERS)
             letter = self.RUSSIAN_LETTERS[letter_index]
@@ -89,25 +85,26 @@ class EnhancedConverterThread(QThread):
 
             try:
                 if not input_path.exists():
-                    raise FileNotFoundError("Файл не найден")
+                    raise FileNotFoundError(f"Файл не найден: {input_path}")
 
+                # === Выходная папка ===
                 output_root = Path(self.output_folder)
                 output_root.mkdir(parents=True, exist_ok=True)
 
-                # Структура папок
+                # Определяем относительную структуру папок
                 rel_dir = Path()
                 if base_folder_str:
                     try:
                         rel_dir = input_path.parent.relative_to(Path(base_folder_str))
                     except ValueError:
-                        pass
+                        pass  # если не в базовой папке — просто в корень
+
                 output_dir = output_root / rel_dir
                 output_dir.mkdir(parents=True, exist_ok=True)
-
                 images_dir = output_dir / "images"
                 images_dir.mkdir(exist_ok=True)
 
-                # ИМЯ ФАЙЛА — БЕЗ ПРЕФИКСА [А]!
+                # Имя файла — без префикса [А], [Б] и т.п.
                 safe_name = sanitize_filename(input_path.stem)
                 output_path = output_dir / f"{safe_name}.md"
 
@@ -116,15 +113,19 @@ class EnhancedConverterThread(QThread):
                     safe_name = safe_name[:100] + "..."
                     output_path = output_dir / f"{safe_name}.md"
 
+                # Пропуск, если файл существует и перезапись отключена
                 if output_path.exists() and not self.options.get("overwrite"):
                     success_count += 1
                     self.conversion_finished.emit(
-                        filename, f"Пропущено: {safe_name}.md", str(output_path)
+                        filename,
+                        f"Пропущено (уже существует): {safe_name}.md",
+                        str(output_path),
                     )
                     self.progress_updated.emit(int((i + 1) / total * 100), filename)
                     continue
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
+                    # === Конвертация через pandoc ===
                     extra_args = [
                         f"--extract-media={tmp_dir}",
                         "--wrap=none",
@@ -143,8 +144,26 @@ class EnhancedConverterThread(QThread):
                         extra_args=extra_args,
                     )
 
-                    # === Все обработки (изображения, таблицы, стили и т.д.) ===
+                    # === УДАЛЕНИЕ ЭКРАНИРОВАНИЯ HTML-КОММЕНТАРИЕВ ===
                     try:
+                        with open(output_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+
+                        # Основные замены: \<!-- → <!-- и --\> → -->
+                        content = content.replace(r"\<!--", "<!--")
+                        content = content.replace(r"--\>", "-->")
+
+                        # Дополнительно — на случай, если pandoc экранирует < и > отдельно
+                        content = content.replace(r"\<", "<").replace(r"\>", ">")
+
+                        with open(output_path, "w", encoding="utf-8") as f:
+                            f.write(content)
+                    except Exception as e:
+                        self.error_occurred.emit(f"Ошибка снятия экранирования: {e}")
+
+                    # === ПОСТОБРАБОТКА: изображения, таблицы, ссылки, стили ===
+                    try:
+                        # Обработка изображений и таблиц
                         process_images(
                             output_path,
                             tmp_dir,
@@ -160,7 +179,7 @@ class EnhancedConverterThread(QThread):
                             appendix_letter=appendix_letter,
                         )
 
-                        # Замена ссылок на изображения
+                        # Замена ссылок на изображения из media → images
                         rules = {}
                         media_dir = Path(tmp_dir) / "media"
                         if media_dir.exists():
@@ -174,20 +193,23 @@ class EnhancedConverterThread(QThread):
                                 }:
                                     old = f"media/{img.name}"
                                     if img.suffix.lower() == ".emf":
-                                        png = convert_emf_to_png(img)
-                                        if png:
-                                            shutil.copy2(png, images_dir / png.name)
-                                            rules[old] = f"images/{png.name}"
+                                        png_path = convert_emf_to_png(img)
+                                        if png_path:
+                                            shutil.copy2(
+                                                png_path, images_dir / png_path.name
+                                            )
+                                            rules[old] = f"images/{png_path.name}"
                                     else:
                                         shutil.copy2(img, images_dir / img.name)
                                         rules[old] = f"images/{img.name}"
                         if rules:
                             replace_image_links(output_path, rules)
 
+                        # Оглавление
                         if self.options.get("toc"):
                             fix_links_and_toc(output_path)
 
-                        # Стили
+                        # Добавление стилей
                         content = output_path.read_text(encoding="utf-8-sig")
                         has_figures = any(
                             tag in content
@@ -209,17 +231,19 @@ class EnhancedConverterThread(QThread):
 
                     except Exception as e:
                         self.error_occurred.emit(
-                            f"Постобработка ошибка ({filename}): {e}"
+                            f"Ошибка постобработки ({filename}): {e}"
                         )
 
                     success_count += 1
                     self.conversion_finished.emit(
-                        filename, f"Успешно: {safe_name}.md", str(output_path)
+                        filename,
+                        f"Успешно конвертирован: {safe_name}.md",
+                        str(output_path),
                     )
                     self.successful_files.append(str(output_path))
 
             except Exception as e:
-                msg = f"Ошибка конвертации {filename}: {str(e)}"
+                msg = f"Ошибка при обработке {filename}: {str(e)}"
                 self.error_occurred.emit(msg)
                 self.conversion_finished.emit(filename, msg, None)
 
