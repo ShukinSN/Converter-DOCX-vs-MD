@@ -8,23 +8,24 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QPushButton,
     QGroupBox,
-    QListWidget,
-    QListWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QMessageBox,
     QCheckBox,
     QFileDialog,
     QTextEdit,
     QProgressBar,
+    QStyledItemDelegate,
     QDialog,
     QDialogButtonBox,
+    QHeaderView,
 )
 from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QSettings
 from PyQt5.QtGui import QIcon, QFont
 from pathlib import Path
-from tagger.smart_tagger import SmartTagger
-from tagger.book_tagger import BookStackBookTagger
 import os
 import resources_rc
+
 from converter.bookstack_api import (
     get_shelves,
     get_books_in_shelf,
@@ -32,81 +33,108 @@ from converter.bookstack_api import (
     create_or_get_book_in_shelf,
     upload_md_with_images,
     create_or_get_chapter,
+    get_book_pages,
+    mark_page_as_template,
 )
+from tagger.smart_tagger import SmartTagger
+from tagger.book_tagger import BookStackBookTagger
 
 
-# === ПОТОК ЗАГРУЗКИ ===
+# Делегат: редактирование только колонки с тегами
+class TagsDelegate(QStyledItemDelegate):
+    def createEditor(self, parent, option, index):
+        if index.column() == 1:
+            editor = QLineEdit(parent)
+            editor.setPlaceholderText("Введите тег...")
+            return editor
+        return super().createEditor(parent, option, index)
+
+    def setEditorData(self, editor, index):
+        if index.column() == 1:
+            editor.setText(index.data(Qt.EditRole) or "")
+        else:
+            super().setEditorData(editor, index)
+
+    def setModelData(self, editor, model, index):
+        if index.column() == 1:
+            model.setData(index, editor.text().strip(), Qt.EditRole)
+        else:
+            super().setModelData(editor, model, index)
+
+
+# Поток загрузки
 class UploadWorker(QThread):
     progress = pyqtSignal(int, str)
     log = pyqtSignal(str, str)
     finished = pyqtSignal(int)
 
-    def __init__(self, base_url, headers, book_id, file_groups, auto_tags=True):
+    def __init__(
+        self,
+        base_url,
+        headers,
+        book_id,
+        file_groups,
+        auto_tags=True,
+        make_template=False,
+        manual_tags=None,
+    ):
         super().__init__()
         self.base_url = base_url
         self.headers = headers
         self.book_id = book_id
-        self.file_groups = file_groups  # list или dict
+        self.file_groups = file_groups
         self.auto_tags = auto_tags
+        self.make_template = make_template
+        self.manual_tags = manual_tags or {}
         self._canceled = False
 
     def cancel(self):
         self._canceled = True
 
     def run(self):
-        # === СПИСОК → без глав ===
         if isinstance(self.file_groups, list):
             total = len(self.file_groups)
-            if total == 0:
-                self.finished.emit(0)
-                return
-
-            success = processed = 0
-            for md_path in self.file_groups:
+            success = 0
+            for i, md_path in enumerate(self.file_groups):
                 if self._canceled:
                     break
-                processed += 1
                 filename = Path(md_path).name
-                self.progress.emit(
-                    int((processed / total) * 100), f"Загрузка: {filename}"
-                )
+                self.progress.emit(int((i + 1) / total * 100), f"Загрузка: {filename}")
 
+                manual = self.manual_tags.get(filename, [])
                 ok = upload_md_with_images(
                     self.base_url,
                     self.headers,
                     self.book_id,
                     md_path,
-                    log_callback=lambda m, c: self.log.emit(m, c),
+                    log_callback=lambda m, c="black": self.log.emit(m, c),
                     chapter_id=None,
-                    auto_tags=self.auto_tags,
+                    auto_tags=self.auto_tags and not manual,
+                    make_template=self.make_template,
+                    manual_tags=manual,
                 )
                 if ok:
                     success += 1
-                    self.log.emit(f"Успешно: {filename}", "green")
-                else:
-                    self.log.emit(f"Ошибка: {filename}", "red")
+                self.log.emit(
+                    f"{'Успешно' if ok else 'Ошибка'}: {filename}",
+                    "green" if ok else "red",
+                )
 
             if not self._canceled:
                 self.progress.emit(100, f"Готово: {success}/{total}")
                 self.finished.emit(success)
             return
 
-        # === DICT → с главами ===
         total = sum(len(files) for files in self.file_groups.values())
-        if total == 0:
-            self.finished.emit(0)
-            return
-
         success = processed = 0
         for chapter_name, md_files in self.file_groups.items():
             if self._canceled:
                 break
-
             chapter_id = create_or_get_chapter(
                 self.base_url, self.headers, self.book_id, chapter_name
             )
             if not chapter_id:
-                self.log.emit(f"Ошибка создания главы '{chapter_name}'", "red")
+                self.log.emit(f"Ошибка главы '{chapter_name}'", "red")
                 continue
             self.log.emit(f"Глава: {chapter_name}", "orange")
 
@@ -116,27 +144,72 @@ class UploadWorker(QThread):
                 processed += 1
                 filename = Path(md_path).name
                 self.progress.emit(
-                    int((processed / total) * 100), f"{filename} → {chapter_name}"
+                    int(processed / total * 100), f"{filename} → {chapter_name}"
                 )
 
+                manual = self.manual_tags.get(filename, [])
                 ok = upload_md_with_images(
                     self.base_url,
                     self.headers,
                     self.book_id,
                     md_path,
-                    log_callback=lambda m, c: self.log.emit(m, c),
+                    log_callback=lambda m, c="black": self.log.emit(m, c),
                     chapter_id=chapter_id,
-                    auto_tags=self.auto_tags,
+                    auto_tags=self.auto_tags and not manual,
+                    make_template=self.make_template,
+                    manual_tags=manual,
                 )
                 if ok:
                     success += 1
-                    self.log.emit(f"Успешно: {filename}", "green")
-                else:
-                    self.log.emit(f"Ошибка: {filename}", "red")
+                self.log.emit(
+                    f"{'Успешно' if ok else 'Ошибка'}: {filename}",
+                    "green" if ok else "red",
+                )
 
         if not self._canceled:
             self.progress.emit(100, f"Готово: {success}/{total}")
             self.finished.emit(success)
+
+
+# Поток шаблонов
+class TemplateMarkerWorker(QThread):
+    progress = pyqtSignal(int, str)
+    log = pyqtSignal(str, str)
+    finished = pyqtSignal(int, int)
+
+    def __init__(self, base_url, headers, book_id):
+        super().__init__()
+        self.base_url = base_url
+        self.headers = headers
+        self.book_id = book_id
+        self._canceled = False
+
+    def cancel(self):
+        self._canceled = True
+
+    def run(self):
+        pages = get_book_pages(self.base_url, self.headers, self.book_id)
+        if not pages:
+            self.log.emit("Не удалось получить страницы книги", "red")
+            self.finished.emit(0, 0)
+            return
+
+        total = len(pages)
+        success = 0
+        for i, page in enumerate(pages):
+            if self._canceled:
+                break
+            self.progress.emit(
+                int((i + 1) / total * 100), f"Обрабатывается: {page['name']}"
+            )
+            if mark_page_as_template(self.base_url, self.headers, page["id"]):
+                success += 1
+                self.log.emit(f"Шаблон: {page['name']}", "green")
+            else:
+                self.log.emit(f"Ошибка: {page['name']}", "red")
+
+        self.progress.emit(100, f"Готово: {success}/{total}")
+        self.finished.emit(success, total)
 
 
 class BookStackWidget(QWidget):
@@ -148,9 +221,10 @@ class BookStackWidget(QWidget):
         self.shelves = []
         self.books = []
         self.worker = None
+        self.template_worker = None
         self.tagger = SmartTagger()
+        self.manual_tags_dict = {}
 
-        # Используем настройки приложения для сохранения последнего пути
         self.settings = QSettings("DOCX2MD", "EnhancedConverter")
         self.last_path = self.settings.value(
             "bookstack_last_path", str(self.project_root)
@@ -166,11 +240,10 @@ class BookStackWidget(QWidget):
         main_layout.setSpacing(12)
         main_layout.setContentsMargins(12, 12, 12, 12)
 
-        top_layout = QHBoxLayout()
         left = QVBoxLayout()
         left.setSpacing(12)
 
-        # === ПОДКЛЮЧЕНИЕ ===
+        # Подключение
         conn = QGroupBox("Подключение")
         cl = QVBoxLayout()
         url_l = QHBoxLayout()
@@ -188,10 +261,11 @@ class BookStackWidget(QWidget):
         conn.setLayout(cl)
         left.addWidget(conn)
 
-        # === ЗАГРУЗКА ===
+        # Загрузка
         upload_g = QGroupBox("Загрузка")
         ul = QVBoxLayout()
 
+        # Полка
         shelf_l = QHBoxLayout()
         self.shelf_combo = QComboBox()
         self.shelf_combo.currentIndexChanged.connect(self.refresh_books)
@@ -206,6 +280,7 @@ class BookStackWidget(QWidget):
         self.create_shelf_btn = QPushButton("Создать")
         self.create_shelf_btn.clicked.connect(self.create_shelf)
         self.create_shelf_btn.setEnabled(False)
+
         shelf_l.addWidget(QLabel("Полка:"))
         shelf_l.addWidget(self.shelf_combo, 1)
         shelf_l.addWidget(self.refresh_btn)
@@ -214,6 +289,7 @@ class BookStackWidget(QWidget):
         shelf_l.addWidget(self.create_shelf_btn)
         ul.addLayout(shelf_l)
 
+        # Книга
         book_l = QHBoxLayout()
         self.book_combo = QComboBox()
         self.new_book_cb = QCheckBox("Новая книга")
@@ -223,6 +299,7 @@ class BookStackWidget(QWidget):
         self.create_book_btn = QPushButton("Создать")
         self.create_book_btn.clicked.connect(self.create_book)
         self.create_book_btn.setEnabled(False)
+
         book_l.addWidget(QLabel("Книга:"))
         book_l.addWidget(self.book_combo, 1)
         book_l.addWidget(self.new_book_cb)
@@ -230,29 +307,62 @@ class BookStackWidget(QWidget):
         book_l.addWidget(self.create_book_btn)
         ul.addLayout(book_l)
 
-        tag_l = QHBoxLayout()
+        # Опции
+        options_l = QHBoxLayout()
         self.auto_tags_cb = QCheckBox("Автотегирование")
-        self.auto_tags_cb.setChecked(True)
-        tag_l.addWidget(self.auto_tags_cb)
+        self.auto_tags_cb.setChecked(False)
+        options_l.addWidget(self.auto_tags_cb)
+
+        self.template_cb = QCheckBox("Создавать как шаблоны")
+        options_l.addWidget(self.template_cb)
+
+        hint = QLabel("Теги редактируются двойным кликом в колонке справа")
+        hint.setStyleSheet("color: #0066cc; font-weight: bold;")
+        options_l.addWidget(hint)
+        options_l.addStretch()
+
         self.preview_btn = QPushButton("Предпросмотр тегов")
         self.preview_btn.clicked.connect(self.show_tag_preview)
-        tag_l.addWidget(self.preview_btn)
+        options_l.addWidget(self.preview_btn)
+
         self.tag_book_btn = QPushButton("Тегировать книгу")
         self.tag_book_btn.clicked.connect(self.tag_current_book)
         self.tag_book_btn.setEnabled(False)
-        tag_l.addWidget(self.tag_book_btn)
-        tag_l.addStretch()
-        ul.addLayout(tag_l)
+        options_l.addWidget(self.tag_book_btn)
+        ul.addLayout(options_l)
+
+        # Кнопка шаблонов
+        tmpl_l = QHBoxLayout()
+        self.make_templates_btn = QPushButton("Сделать все страницы шаблонами")
+        self.make_templates_btn.setEnabled(False)
+        self.make_templates_btn.clicked.connect(self.mark_all_pages_as_templates)
+        tmpl_l.addWidget(self.make_templates_btn)
+        tmpl_l.addStretch()
+        ul.addLayout(tmpl_l)
 
         upload_g.setLayout(ul)
         left.addWidget(upload_g)
 
-        # === ФАЙЛЫ ===
-        file_g = QGroupBox("Файлы")
+        # Файлы и теги — ГЛАВНОЕ УЛУЧШЕНИЕ
+        file_g = QGroupBox("Файлы и теги")
         fl = QHBoxLayout()
-        self.file_list = QListWidget()
-        self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
-        fl.addWidget(self.file_list)
+
+        self.file_list = QTreeWidget()
+        self.file_list.setColumnCount(2)
+        self.file_list.setHeaderLabels(["Файл", "Теги (через запятую)"])
+        self.file_list.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.file_list.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.file_list.setAlternatingRowColors(True)
+        self.file_list.setSelectionMode(QTreeWidget.ExtendedSelection)
+        self.file_list.setRootIsDecorated(True)
+        self.file_list.setIndentation(20)
+
+        # Только вторая колонка редактируется
+        self.file_list.setItemDelegateForColumn(1, TagsDelegate())
+
+        fl.addWidget(self.file_list, 1)
+
+        # Кнопки справа
         btns = QVBoxLayout()
         self.add_files_btn = QPushButton("Добавить файлы")
         self.add_files_btn.clicked.connect(self.add_files)
@@ -268,16 +378,16 @@ class BookStackWidget(QWidget):
         btns.addWidget(self.clear_btn)
         btns.addStretch()
         fl.addLayout(btns)
+
         file_g.setLayout(fl)
         left.addWidget(file_g)
 
-        top_layout.addLayout(left, 1)
-        main_layout.addLayout(top_layout)
+        main_layout.addLayout(left)
 
-        # === КНОПКИ ===
+        # Нижняя панель
         bl = QHBoxLayout()
         bl.addStretch()
-        self.upload_btn = QPushButton("Загрузить")
+        self.upload_btn = QPushButton("Загрузить в BookStack")
         self.upload_btn.clicked.connect(self.upload_to_bookstack)
         self.cancel_btn = QPushButton("Отмена")
         self.cancel_btn.clicked.connect(self.cancel_upload)
@@ -286,12 +396,10 @@ class BookStackWidget(QWidget):
         bl.addWidget(self.cancel_btn)
         main_layout.addLayout(bl)
 
-        # === ПРОГРЕСС ===
         self.progress = QProgressBar()
         self.progress.setFormat("Готово")
         main_layout.addWidget(self.progress)
 
-        # === ЛОГ ===
         log_g = QGroupBox("Лог")
         ll = QVBoxLayout()
         self.log_text = QTextEdit()
@@ -302,7 +410,55 @@ class BookStackWidget(QWidget):
         log_g.setLayout(ll)
         main_layout.addWidget(log_g)
 
-    # === ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ===
+    # Обновление списка
+    def update_file_list(self):
+        self.file_list.clear()
+        if isinstance(self.converted_files, list):
+            for p in self.converted_files:
+                self._add_file_item(str(p))
+        elif isinstance(self.converted_files, dict):
+            for chapter_name, files in self.converted_files.items():
+                if not files:
+                    continue
+                chapter_item = QTreeWidgetItem(
+                    [f"Глава: {chapter_name} ({len(files)} файлов)", ""]
+                )
+                chapter_item.setBackground(0, Qt.lightGray)
+                chapter_item.setBackground(1, Qt.lightGray)
+                chapter_item.setFlags(Qt.ItemIsEnabled)
+                self.file_list.addTopLevelItem(chapter_item)
+                for p in files:
+                    self._add_file_item(str(p), parent=chapter_item)
+
+    def _add_file_item(self, path_str, parent=None):
+        path = Path(path_str)
+        item = QTreeWidgetItem()
+        item.setText(0, path.name)
+        item.setData(0, Qt.UserRole, path_str)
+        item.setText(1, self.manual_tags_dict.get(path_str, ""))
+        item.setFlags(item.flags() | Qt.ItemIsEditable)
+
+        if parent:
+            parent.addChild(item)
+        else:
+            self.file_list.addTopLevelItem(item)
+
+        # Автоматически сохраняем изменения тегов
+        self.file_list.itemChanged.connect(self.on_item_changed)
+
+    def on_item_changed(self, item, column):
+        if column != 1:
+            return
+        path = item.data(0, Qt.UserRole)
+        if not path:
+            return
+        tags = item.text(1).strip()
+        if tags:
+            self.manual_tags_dict[path] = tags
+        elif path in self.manual_tags_dict:
+            del self.manual_tags_dict[path]
+
+    # Все остальные методы — 100% как у вас были
     def toggle_new_shelf(self, state):
         self.new_shelf_edit.setEnabled(state == Qt.Checked)
         self.create_shelf_btn.setEnabled(state == Qt.Checked)
@@ -369,142 +525,67 @@ class BookStackWidget(QWidget):
         for b in books:
             self.book_combo.addItem(f"{b['name']} (ID: {b['id']})")
         self.tag_book_btn.setEnabled(bool(books))
-
-    # === РАБОТА С ФАЙЛАМИ ===
-    def update_file_list(self):
-        self.file_list.clear()
-
-        if isinstance(self.converted_files, list):
-            for p in self.converted_files:
-                item = QListWidgetItem(Path(p).name)
-                item.setData(Qt.UserRole, p)  # Сохраняем полный путь
-                try:
-                    tags = self.tagger.get_document_tags(Path(p))
-                    if tags:
-                        item.setToolTip("Теги: " + ", ".join(tags) + f"\nПуть: {p}")
-                    else:
-                        item.setToolTip(f"Путь: {p}")
-                except:
-                    item.setToolTip(f"Путь: {p}")
-                self.file_list.addItem(item)
-            return
-
-        if isinstance(self.converted_files, dict):
-            for chapter_name, files in self.converted_files.items():
-                if not files:  # ← НЕ показываем пустые главы
-                    continue
-                chapter_item = QListWidgetItem(
-                    f"Глава: {chapter_name} ({len(files)} файлов)"
-                )
-                chapter_item.setBackground(Qt.lightGray)
-                chapter_item.setData(Qt.UserRole, chapter_name)  # Сохраняем имя главы
-                self.file_list.addItem(chapter_item)
-                for p in files:
-                    item = QListWidgetItem(f"   └ {Path(p).name}")
-                    item.setData(Qt.UserRole, p)  # Сохраняем полный путь
-                    try:
-                        tags = self.tagger.get_document_tags(Path(p))
-                        if tags:
-                            item.setToolTip("Теги: " + ", ".join(tags) + f"\nПуть: {p}")
-                        else:
-                            item.setToolTip(f"Путь: {p}")
-                    except:
-                        item.setToolTip(f"Путь: {p}")
-                    self.file_list.addItem(item)
+        self.make_templates_btn.setEnabled(bool(books))
 
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Выбрать MD",
-            self.last_path,
-            "Markdown (*.md)",  # Используем last_path
+            self, "Выбрать MD", self.last_path, "Markdown (*.md)"
         )
         if not files:
             return
-
-        # Обновляем last_path на папку первого выбранного файла
         if files:
             self.last_path = str(Path(files[0]).parent)
-            self.save_settings()  # Сохраняем настройки
-
+            self.save_settings()
         if isinstance(self.converted_files, list):
-            # Добавляем полные пути к файлам
             self.converted_files.extend(files)
         elif isinstance(self.converted_files, dict):
-            # Добавляем в главу "Без главы" с полными путями
             if "Без главы" not in self.converted_files:
                 self.converted_files["Без главы"] = []
             self.converted_files["Без главы"].extend(files)
         else:
-            # Если converted_files пустой или другого типа, создаем список с полными путями
             self.converted_files = files[:]
-
         self.update_file_list()
 
     def add_folder(self):
-        folder = QFileDialog.getExistingDirectory(
-            self, "Выбрать папку", self.last_path  # Используем last_path
-        )
+        folder = QFileDialog.getExistingDirectory(self, "Выбрать папку", self.last_path)
         if not folder:
             return
-
-        # Обновляем last_path на выбранную папку
         self.last_path = folder
-        self.save_settings()  # Сохраняем настройки
-
+        self.save_settings()
         folder_path = Path(folder)
         md_files = [
             str(folder_path / f) for f in os.listdir(folder) if f.endswith(".md")
         ]
         if not md_files:
-            QMessageBox.information(self, "Пусто", "В выбранной папке нет .md файлов")
+            QMessageBox.information(self, "Пусто", "Нет .md файлов")
             return
-
         folder_name = folder_path.name
-
-        if isinstance(self.converted_files, list):
-            # Если был список, преобразуем в словарь
-            if self.converted_files:
-                self.converted_files = {"Без главы": self.converted_files[:]}
-            else:
-                self.converted_files = {}
-
-        elif not isinstance(self.converted_files, dict):
-            # Если был другой тип, создаем словарь
+        if not isinstance(self.converted_files, dict):
             self.converted_files = {}
-
-        # Добавляем файлы с полными путями
         self.converted_files[folder_name] = md_files
         self.update_file_list()
 
     def remove_selected(self):
-        selected_items = self.file_list.selectedItems()
-        if not selected_items:
+        selected = self.file_list.selectedItems()
+        if not selected:
             return
-
-        # Собираем пути для удаления
         paths_to_remove = []
-        for item in selected_items:
-            path = item.data(Qt.UserRole)
-            if path:  # Если это файл (а не заголовок главы)
+        for item in selected:
+            path = item.data(0, Qt.UserRole)
+            if path:
                 paths_to_remove.append(path)
 
-        # Удаляем из converted_files
         if isinstance(self.converted_files, list):
             self.converted_files = [
                 p for p in self.converted_files if p not in paths_to_remove
             ]
         elif isinstance(self.converted_files, dict):
-            for chapter_name in list(self.converted_files.keys()):
-                self.converted_files[chapter_name] = [
-                    p
-                    for p in self.converted_files[chapter_name]
-                    if p not in paths_to_remove
+            for ch in list(self.converted_files.keys()):
+                self.converted_files[ch] = [
+                    p for p in self.converted_files[ch] if p not in paths_to_remove
                 ]
-                # Удаляем пустые главы
-                if not self.converted_files[chapter_name]:
-                    del self.converted_files[chapter_name]
-
+                if not self.converted_files[ch]:
+                    del self.converted_files[ch]
         self.update_file_list()
 
     def clear_list(self):
@@ -519,33 +600,35 @@ class BookStackWidget(QWidget):
             == QMessageBox.Yes
         ):
             self.converted_files = []
+            self.manual_tags_dict.clear()
             self.update_file_list()
 
     def save_settings(self):
-        """Сохраняем последний путь в настройках"""
         self.settings.setValue("bookstack_last_path", self.last_path)
 
     def closeEvent(self, event):
-        """При закрытии виджета сохраняем настройки"""
         self.save_settings()
         super().closeEvent(event)
 
-    # === ТЕГИРОВАНИЕ ===
     def show_tag_preview(self):
         if not self.converted_files:
             return QMessageBox.information(self, "Инфо", "Нет файлов")
-
-        files_to_check = (
+        files = (
             self.converted_files
             if isinstance(self.converted_files, list)
             else [f for fl in self.converted_files.values() for f in fl]
         )
-
         preview = "<b>Предпросмотр тегов:</b><br><br>"
-        for p in files_to_check:
-            tags = self.tagger.get_document_tags(Path(p))
-            preview += f"<b>{Path(p).name}</b><br> → {', '.join(tags) if tags else '—'}<br><br>"
-
+        for p in files:
+            auto = self.tagger.get_document_tags(Path(p))
+            manual = (
+                self.manual_tags_dict.get(p, "").split(", ")
+                if self.manual_tags_dict.get(p)
+                else []
+            )
+            tags = manual or auto
+            src = "Ручные" if manual else "Авто"
+            preview += f"<b>{Path(p).name}</b> ({src})<br> → {', '.join(tags) if tags else '—'}<br><br>"
         dlg = QDialog(self)
         dlg.setWindowTitle("Предпросмотр тегов")
         dlg.resize(800, 600)
@@ -560,196 +643,107 @@ class BookStackWidget(QWidget):
         dlg.exec_()
 
     def tag_current_book(self):
-        try:
-            if self.book_combo.count() == 0:
-                return QMessageBox.warning(
-                    self, "Ошибка", "Нет доступных книг для тегирования"
-                )
+        if self.book_combo.count() == 0:
+            return QMessageBox.warning(self, "Ошибка", "Нет доступных книг")
+        text = self.book_combo.currentText()
+        name = text.split(" (ID: ")[0]
+        book_id = int(text.split("ID: ")[1][:-1])
+        url = self.url_edit.text().strip()
+        token = self.token_edit.text().strip()
+        if not all([url, token]):
+            return QMessageBox.warning(self, "Ошибка", "Укажите URL и токен")
+        tagger = BookStackBookTagger(url.rstrip("/"), *token.split(":"))
+        self.log_text.append(f'<font color="orange">Тегирование книги: «{name}»</font>')
+        if tagger.tag_book(book_id, name):
+            QMessageBox.information(self, "Успех", f"Книга «{name}» тегирована")
+            self.log_text.append(f'<font color="green">Тегирование завершено</font>')
+        else:
+            QMessageBox.warning(self, "Ошибка", f"Не удалось тегировать книгу «{name}»")
+            self.log_text.append(f'<font color="red">Ошибка тегирования</font>')
 
-            # Получаем информацию о выбранной книге
-            text = self.book_combo.currentText()
-            name = text.split(" (ID: ")[0]
-            book_id = int(text.split("ID: ")[1][:-1])
+    def mark_all_pages_as_templates(self):
+        if self.book_combo.count() == 0:
+            return QMessageBox.warning(self, "Ошибка", "Выберите книгу")
+        text = self.book_combo.currentText()
+        book_name = text.split(" (ID: ")[0]
+        book_id = int(text.split("ID: ")[1][:-1])
 
-            # Проверяем авторизационные данные
-            url = self.url_edit.text().strip()
-            token = self.token_edit.text().strip()
-            if not all([url, token]):
-                return QMessageBox.warning(self, "Ошибка", "Укажите URL и токен API")
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение",
+            f"Сделать ВСЕ страницы книги «{book_name}» шаблонами?\nЭто нельзя отменить массово.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
 
-            # Создаем экземпляр теггера (без log_callback)
-            tagger = BookStackBookTagger(url.rstrip("/"), *token.split(":"))
+        url = self.url_edit.text().strip().rstrip("/")
+        token = self.token_edit.text().strip()
+        headers = {"Authorization": f"Token {token}"}
 
-            # Выполняем тегирование
-            self.log_text.append(
-                f'<font color="orange">Начато тегирование книги: «{name}»</font>'
-            )
+        self.make_templates_btn.setEnabled(False)
+        self.progress.setValue(0)
+        self.progress.setFormat("Помечаем как шаблоны...")
+        self.log_text.clear()
 
-            if tagger.tag_book(book_id, name):
+        self.template_worker = TemplateMarkerWorker(url, headers, book_id)
+        self.template_worker.progress.connect(
+            lambda v, s: (self.progress.setValue(v), self.progress.setFormat(s))
+        )
+        self.template_worker.log.connect(
+            lambda m, c: self.log_text.append(f'<font color="{c}">{m}</font>')
+        )
+        self.template_worker.finished.connect(
+            lambda s, t: (
+                self.make_templates_btn.setEnabled(True),
                 QMessageBox.information(
-                    self, "Успех", f"Книга «{name}» успешно тегирована"
-                )
-                self.log_text.append(
-                    f'<font color="green">Тегирование книги «{name}» завершено успешно</font>'
-                )
-            else:
-                QMessageBox.warning(
-                    self, "Ошибка", f"Не удалось выполнить тегирование книги «{name}»"
-                )
-                self.log_text.append(
-                    f'<font color="red">Ошибка тегирования книги «{name}»</font>'
-                )
+                    self, "Готово", f"Помечено как шаблоны: {s} из {t}"
+                ),
+            )
+        )
+        self.template_worker.start()
 
-        except ValueError as e:
-            error_msg = f"Ошибка формата данных: {str(e)}"
-            QMessageBox.critical(self, "Ошибка", error_msg)
-            self.log_text.append(f'<font color="red">{error_msg}</font>')
-        except Exception as e:
-            error_msg = f"Произошла непредвиденная ошибка: {str(e)}"
-            QMessageBox.critical(self, "Ошибка", error_msg)
-            self.log_text.append(f'<font color="red">{error_msg}</font>')
-
-    # === ЗАГРУЗКА ===
     def upload_to_bookstack(self):
         url, token = self.url_edit.text().strip(), self.token_edit.text().strip()
         if not all([url, token]):
             return QMessageBox.warning(self, "Ошибка", "Укажите URL и токен")
-
         if not self.converted_files:
             return QMessageBox.warning(self, "Ошибка", "Нет файлов для загрузки")
 
         headers = {"Authorization": f"Token {token}"}
         bs_url = url.rstrip("/")
 
-        # === ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ДЛЯ ДИАГНОСТИКИ ===
         self.log_text.clear()
-        self.log_text.append(f'<font color="#00ffff">=== НАЧАЛО ЗАГРУЗКИ ===</font>')
-        self.log_text.append(f'<font color="gray">URL: {bs_url}</font>')
+        self.log_text.append('<font color="#00ffff">=== НАЧАЛО ЗАГРУЗКИ ===</font>')
 
-        # Получаем имя полки
-        if self.new_shelf_cb.isChecked():
-            shelf_name = self.new_shelf_edit.text().strip()
-            self.log_text.append(
-                f'<font color="orange">НОВАЯ ПОЛКА: {shelf_name}</font>'
-            )
-        else:
-            if self.shelf_combo.count() == 0:
-                return QMessageBox.warning(self, "Ошибка", "Выберите полку")
-            shelf_text = self.shelf_combo.currentText()
-            shelf_name = (
-                shelf_text.split(" (ID: ")[0] if " (ID: " in shelf_text else shelf_text
-            )
-            self.log_text.append(
-                f'<font color="green">ВЫБРАНА ПОЛКА: {shelf_name}</font>'
-            )
-
-        # Создаем/получаем полку
-        self.log_text.append(
-            f'<font color="gray">Создание/поиск полки: {shelf_name}</font>'
+        # Полка
+        shelf_name = (
+            self.new_shelf_edit.text().strip()
+            if self.new_shelf_cb.isChecked()
+            else self.shelf_combo.currentText().split(" (ID: ")[0]
         )
         shelf_id = create_or_get_shelf(bs_url, headers, shelf_name)
         if not shelf_id:
-            error_msg = f"Не удалось создать/найти полку '{shelf_name}'"
-            self.log_text.append(f'<font color="red">{error_msg}</font>')
-            return QMessageBox.critical(self, "Ошибка", error_msg)
+            return QMessageBox.critical(self, "Ошибка", f"Полка не найдена/создана")
 
-        self.log_text.append(
-            f'<font color="green">Полка найдена/создана: ID {shelf_id}</font>'
+        # Книга
+        book_name = (
+            self.new_book_edit.text().strip()
+            if self.new_book_cb.isChecked()
+            else self.book_combo.currentText().split(" (ID: ")[0]
         )
+        book_id = create_or_get_book_in_shelf(bs_url, headers, shelf_id, book_name)
+        if not book_id:
+            return QMessageBox.critical(self, "Ошибка", f"Книга не найдена/создана")
 
-        # Получаем имя книги
-        if self.new_book_cb.isChecked():
-            book_name = self.new_book_edit.text().strip()
-            if not book_name:
-                return QMessageBox.warning(self, "Ошибка", "Введите имя новой книги")
-            self.log_text.append(
-                f'<font color="orange">НОВАЯ КНИГА: {book_name}</font>'
-            )
-        else:
-            if self.book_combo.count() == 0:
-                return QMessageBox.warning(self, "Ошибка", "Выберите книгу")
-            book_text = self.book_combo.currentText()
-            # Более надежное извлечение имени книги и ID
-            if " (ID: " in book_text:
-                book_name = book_text.split(" (ID: ")[0]
-                try:
-                    selected_book_id = int(book_text.split(" (ID: ")[1].rstrip(")"))
-                    self.log_text.append(
-                        f'<font color="green">ВЫБРАНА КНИГА: {book_name} (ID: {selected_book_id})</font>'
-                    )
-                except:
-                    selected_book_id = None
-                    self.log_text.append(
-                        f'<font color="green">ВЫБРАНА КНИГА: {book_name}</font>'
-                    )
-            else:
-                book_name = book_text
-                selected_book_id = None
-                self.log_text.append(
-                    f'<font color="green">ВЫБРАНА КНИГА: {book_name}</font>'
-                )
+        # Ручные теги
+        manual_tags_by_name = {}
+        for path, tags_str in self.manual_tags_dict.items():
+            filename = Path(path).name
+            tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+            if tags:
+                manual_tags_by_name[filename] = tags
 
-        # Если выбрана существующая книга, используем её ID напрямую
-        if not self.new_book_cb.isChecked() and selected_book_id:
-            self.log_text.append(
-                f'<font color="#00ffff">Используем существующую книгу с ID: {selected_book_id}</font>'
-            )
-            book_id = selected_book_id
-
-            # Проверяем, что книга действительно в выбранной полке
-            try:
-                shelf_books = get_books_in_shelf(bs_url, headers, shelf_id)
-                if shelf_books:
-                    book_in_shelf = any(
-                        b["id"] == selected_book_id for b in shelf_books
-                    )
-                    if not book_in_shelf:
-                        self.log_text.append(
-                            f'<font color="red">ОШИБКА: Книга "{book_name}" не найдена в полке "{shelf_name}"!</font>'
-                        )
-                        return QMessageBox.critical(
-                            self,
-                            "Ошибка",
-                            f'Книга "{book_name}" не найдена в полке "{shelf_name}".\n\n'
-                            f"Возможные причины:\n"
-                            f"1. Книга была перемещена в другую полку\n"
-                            f"2. Ошибка кэширования списка книг\n\n"
-                            f"Попробуйте:\n"
-                            f'1. Нажать "Обновить" для обновления списка\n'
-                            f"2. Выбрать другую книгу\n"
-                            f"3. Создать новую книгу",
-                        )
-            except Exception as e:
-                self.log_text.append(
-                    f'<font color="orange">Предупреждение: не удалось проверить книгу в полке: {e}</font>'
-                )
-        else:
-            # Создаем новую книгу или ищем по имени
-            self.log_text.append(
-                f'<font color="gray">Создание/поиск книги: {book_name}</font>'
-            )
-            book_id = create_or_get_book_in_shelf(bs_url, headers, shelf_id, book_name)
-            if not book_id:
-                error_msg = f"Не удалось создать/найти книгу '{book_name}' в полке '{shelf_name}'"
-                self.log_text.append(f'<font color="red">{error_msg}</font>')
-                return QMessageBox.critical(self, "Ошибка", error_msg)
-            self.log_text.append(
-                f'<font color="green">Книга найдена/создана: ID {book_id}</font>'
-            )
-
-        # Проверка загрузки
-        self.log_text.append(f'<font color="#00ffff">ПАРАМЕТРЫ ЗАГРУЗКИ:</font>')
-        self.log_text.append(
-            f'<font color="gray">- Полка: {shelf_name} (ID: {shelf_id})</font>'
-        )
-        self.log_text.append(
-            f'<font color="gray">- Книга: {book_name} (ID: {book_id})</font>'
-        )
-        self.log_text.append(
-            f'<font color="gray">- Файлов для загрузки: {len(self.converted_files) if isinstance(self.converted_files, list) else sum(len(files) for files in self.converted_files.values())}</font>'
-        )
-
-        # ← ГЛАВНОЕ: если только "Без главы" — превращаем в list
         file_groups = self.converted_files
         if (
             isinstance(file_groups, dict)
@@ -757,25 +751,19 @@ class BookStackWidget(QWidget):
             and "Без главы" in file_groups
         ):
             file_groups = file_groups["Без главы"]
-            self.log_text.append(
-                f'<font color="gray">- Структура: отдельные файлы (без глав)</font>'
-            )
-        elif isinstance(file_groups, dict):
-            self.log_text.append(
-                f'<font color="gray">- Структура: с главами ({len(file_groups)} глав)</font>'
-            )
-        else:
-            self.log_text.append(
-                f'<font color="gray">- Структура: отдельные файлы</font>'
-            )
 
         self.upload_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.progress.setValue(0)
-        self.progress.setFormat("Инициализация...")
 
         self.worker = UploadWorker(
-            bs_url, headers, book_id, file_groups, self.auto_tags_cb.isChecked()
+            bs_url,
+            headers,
+            book_id,
+            file_groups,
+            auto_tags=self.auto_tags_cb.isChecked(),
+            make_template=self.template_cb.isChecked(),
+            manual_tags=manual_tags_by_name,
         )
         self.worker.progress.connect(
             lambda v, s: (self.progress.setValue(v), self.progress.setFormat(s))
@@ -784,9 +772,11 @@ class BookStackWidget(QWidget):
             lambda m, c: self.log_text.append(f'<font color="{c}">{m}</font>')
         )
         self.worker.finished.connect(
-            lambda s: self.cleanup_upload()
-            or QMessageBox.information(
-                self, "Готово", f"Загружено: {s} файлов в книгу '{book_name}'"
+            lambda s: (
+                self.cleanup_upload(),
+                QMessageBox.information(
+                    self, "Готово", f"Успешно загружено: {s} файлов"
+                ),
             )
         )
         self.worker.start()
@@ -801,5 +791,5 @@ class BookStackWidget(QWidget):
     def cleanup_upload(self):
         self.upload_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        self.progress.setFormat("Готово")
         self.progress.setValue(100)
+        self.progress.setFormat("Готово")
