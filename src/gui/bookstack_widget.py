@@ -24,6 +24,7 @@ from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QSettings
 from PyQt5.QtGui import QIcon, QFont
 from pathlib import Path
 import os
+import re
 import resources_rc
 
 from converter.bookstack_api import (
@@ -34,7 +35,6 @@ from converter.bookstack_api import (
     upload_md_with_images,
     create_or_get_chapter,
     get_book_pages,
-    mark_page_as_template,
 )
 from tagger.smart_tagger import SmartTagger
 from tagger.book_tagger import BookStackBookTagger
@@ -75,7 +75,6 @@ class UploadWorker(QThread):
         book_id,
         file_groups,
         auto_tags=True,
-        make_template=False,
         manual_tags=None,
     ):
         super().__init__()
@@ -84,7 +83,6 @@ class UploadWorker(QThread):
         self.book_id = book_id
         self.file_groups = file_groups
         self.auto_tags = auto_tags
-        self.make_template = make_template
         self.manual_tags = manual_tags or {}
         self._canceled = False
 
@@ -110,7 +108,6 @@ class UploadWorker(QThread):
                     log_callback=lambda m, c="black": self.log.emit(m, c),
                     chapter_id=None,
                     auto_tags=self.auto_tags and not manual,
-                    make_template=self.make_template,
                     manual_tags=manual,
                 )
                 if ok:
@@ -156,7 +153,6 @@ class UploadWorker(QThread):
                     log_callback=lambda m, c="black": self.log.emit(m, c),
                     chapter_id=chapter_id,
                     auto_tags=self.auto_tags and not manual,
-                    make_template=self.make_template,
                     manual_tags=manual,
                 )
                 if ok:
@@ -171,45 +167,22 @@ class UploadWorker(QThread):
             self.finished.emit(success)
 
 
-# Поток шаблонов
-class TemplateMarkerWorker(QThread):
-    progress = pyqtSignal(int, str)
-    log = pyqtSignal(str, str)
-    finished = pyqtSignal(int, int)
+def extract_numbers_from_filename(filename):
+    """Извлекает числа из имени файла для правильной сортировки."""
+    # Удаляем расширение .md
+    name_without_ext = Path(filename).stem
 
-    def __init__(self, base_url, headers, book_id):
-        super().__init__()
-        self.base_url = base_url
-        self.headers = headers
-        self.book_id = book_id
-        self._canceled = False
+    # Ищем все числа в названии
+    numbers = re.findall(r"\d+", name_without_ext)
+    return [int(num) for num in numbers] if numbers else [0]
 
-    def cancel(self):
-        self._canceled = True
 
-    def run(self):
-        pages = get_book_pages(self.base_url, self.headers, self.book_id)
-        if not pages:
-            self.log.emit("Не удалось получить страницы книги", "red")
-            self.finished.emit(0, 0)
-            return
-
-        total = len(pages)
-        success = 0
-        for i, page in enumerate(pages):
-            if self._canceled:
-                break
-            self.progress.emit(
-                int((i + 1) / total * 100), f"Обрабатывается: {page['name']}"
-            )
-            if mark_page_as_template(self.base_url, self.headers, page["id"]):
-                success += 1
-                self.log.emit(f"Шаблон: {page['name']}", "green")
-            else:
-                self.log.emit(f"Ошибка: {page['name']}", "red")
-
-        self.progress.emit(100, f"Готово: {success}/{total}")
-        self.finished.emit(success, total)
+def natural_sort_key(filename):
+    """Функция для естественной сортировки файлов с номерами."""
+    path = Path(filename)
+    numbers = extract_numbers_from_filename(path.name)
+    # Возвращаем кортеж: сначала числа, затем полное имя для сортировки
+    return (numbers, path.name.lower())
 
 
 class BookStackWidget(QWidget):
@@ -221,7 +194,6 @@ class BookStackWidget(QWidget):
         self.shelves = []
         self.books = []
         self.worker = None
-        self.template_worker = None
         self.tagger = SmartTagger()
         self.manual_tags_dict = {}
 
@@ -230,10 +202,31 @@ class BookStackWidget(QWidget):
             "bookstack_last_path", str(self.project_root)
         )
 
-        self.converted_files = converted_files or []
+        # При инициализации сразу сортируем файлы
+        self.converted_files = self._sort_converted_files(converted_files or [])
 
         self.init_ui()
         self.update_file_list()
+
+    def _sort_converted_files(self, converted_files):
+        """Сортировка конвертированных файлов с учетом номеров в названиях"""
+        if isinstance(converted_files, list):
+            # Сортируем список файлов
+            return sorted(converted_files, key=natural_sort_key)
+        elif isinstance(converted_files, dict):
+            # Сортируем словарь: главы и файлы внутри глав
+            sorted_dict = {}
+            # Сортируем ключи глав по естественной сортировке
+            for chapter_name in sorted(
+                converted_files.keys(), key=lambda x: natural_sort_key(str(x))
+            ):
+                # Сортируем файлы внутри каждой главы
+                sorted_files = sorted(
+                    converted_files[chapter_name], key=natural_sort_key
+                )
+                sorted_dict[chapter_name] = sorted_files
+            return sorted_dict
+        return converted_files
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -313,9 +306,6 @@ class BookStackWidget(QWidget):
         self.auto_tags_cb.setChecked(False)
         options_l.addWidget(self.auto_tags_cb)
 
-        self.template_cb = QCheckBox("Создавать как шаблоны")
-        options_l.addWidget(self.template_cb)
-
         hint = QLabel("Теги редактируются двойным кликом в колонке справа")
         hint.setStyleSheet("color: #0066cc; font-weight: bold;")
         options_l.addWidget(hint)
@@ -330,15 +320,6 @@ class BookStackWidget(QWidget):
         self.tag_book_btn.setEnabled(False)
         options_l.addWidget(self.tag_book_btn)
         ul.addLayout(options_l)
-
-        # Кнопка шаблонов
-        tmpl_l = QHBoxLayout()
-        self.make_templates_btn = QPushButton("Сделать все страницы шаблонами")
-        self.make_templates_btn.setEnabled(False)
-        self.make_templates_btn.clicked.connect(self.mark_all_pages_as_templates)
-        tmpl_l.addWidget(self.make_templates_btn)
-        tmpl_l.addStretch()
-        ul.addLayout(tmpl_l)
 
         upload_g.setLayout(ul)
         left.addWidget(upload_g)
@@ -356,8 +337,6 @@ class BookStackWidget(QWidget):
         self.file_list.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.file_list.setRootIsDecorated(True)
         self.file_list.setIndentation(20)
-
-        # Только вторая колонка редактируется
         self.file_list.setItemDelegateForColumn(1, TagsDelegate())
 
         fl.addWidget(self.file_list, 1)
@@ -413,10 +392,18 @@ class BookStackWidget(QWidget):
     # Обновление списка
     def update_file_list(self):
         self.file_list.clear()
+
+        try:
+            self.file_list.itemChanged.disconnect()
+        except:
+            pass
+
         if isinstance(self.converted_files, list):
+
             for p in self.converted_files:
                 self._add_file_item(str(p))
         elif isinstance(self.converted_files, dict):
+
             for chapter_name, files in self.converted_files.items():
                 if not files:
                     continue
@@ -429,6 +416,9 @@ class BookStackWidget(QWidget):
                 self.file_list.addTopLevelItem(chapter_item)
                 for p in files:
                     self._add_file_item(str(p), parent=chapter_item)
+
+        # Подключаем сигнал обратно
+        self.file_list.itemChanged.connect(self.on_item_changed)
 
     def _add_file_item(self, path_str, parent=None):
         path = Path(path_str)
@@ -443,9 +433,6 @@ class BookStackWidget(QWidget):
         else:
             self.file_list.addTopLevelItem(item)
 
-        # Автоматически сохраняем изменения тегов
-        self.file_list.itemChanged.connect(self.on_item_changed)
-
     def on_item_changed(self, item, column):
         if column != 1:
             return
@@ -458,7 +445,6 @@ class BookStackWidget(QWidget):
         elif path in self.manual_tags_dict:
             del self.manual_tags_dict[path]
 
-    # Все остальные методы — 100% как у вас были
     def toggle_new_shelf(self, state):
         self.new_shelf_edit.setEnabled(state == Qt.Checked)
         self.create_shelf_btn.setEnabled(state == Qt.Checked)
@@ -525,7 +511,6 @@ class BookStackWidget(QWidget):
         for b in books:
             self.book_combo.addItem(f"{b['name']} (ID: {b['id']})")
         self.tag_book_btn.setEnabled(bool(books))
-        self.make_templates_btn.setEnabled(bool(books))
 
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -536,14 +521,23 @@ class BookStackWidget(QWidget):
         if files:
             self.last_path = str(Path(files[0]).parent)
             self.save_settings()
+
+        # Сортируем файлы перед добавлением
+        sorted_files = sorted(files, key=natural_sort_key)
+
         if isinstance(self.converted_files, list):
-            self.converted_files.extend(files)
+            self.converted_files.extend(sorted_files)
+            # Сортируем весь список
+            self.converted_files.sort(key=natural_sort_key)
         elif isinstance(self.converted_files, dict):
             if "Без главы" not in self.converted_files:
                 self.converted_files["Без главы"] = []
-            self.converted_files["Без главы"].extend(files)
+            self.converted_files["Без главы"].extend(sorted_files)
+            # Сортируем файлы в главе
+            self.converted_files["Без главы"].sort(key=natural_sort_key)
         else:
-            self.converted_files = files[:]
+            self.converted_files = sorted_files[:]
+
         self.update_file_list()
 
     def add_folder(self):
@@ -559,10 +553,17 @@ class BookStackWidget(QWidget):
         if not md_files:
             QMessageBox.information(self, "Пусто", "Нет .md файлов")
             return
+
+        # Сортируем файлы из папки
+        md_files.sort(key=natural_sort_key)
+
         folder_name = folder_path.name
         if not isinstance(self.converted_files, dict):
             self.converted_files = {}
         self.converted_files[folder_name] = md_files
+
+        # Сортируем структуру
+        self.converted_files = self._sort_converted_files(self.converted_files)
         self.update_file_list()
 
     def remove_selected(self):
@@ -579,6 +580,8 @@ class BookStackWidget(QWidget):
             self.converted_files = [
                 p for p in self.converted_files if p not in paths_to_remove
             ]
+            # После удаления пересортируем
+            self.converted_files.sort(key=natural_sort_key)
         elif isinstance(self.converted_files, dict):
             for ch in list(self.converted_files.keys()):
                 self.converted_files[ch] = [
@@ -586,6 +589,10 @@ class BookStackWidget(QWidget):
                 ]
                 if not self.converted_files[ch]:
                     del self.converted_files[ch]
+                else:
+                    # Сортируем файлы в главе после удаления
+                    self.converted_files[ch].sort(key=natural_sort_key)
+
         self.update_file_list()
 
     def clear_list(self):
@@ -661,48 +668,6 @@ class BookStackWidget(QWidget):
             QMessageBox.warning(self, "Ошибка", f"Не удалось тегировать книгу «{name}»")
             self.log_text.append(f'<font color="red">Ошибка тегирования</font>')
 
-    def mark_all_pages_as_templates(self):
-        if self.book_combo.count() == 0:
-            return QMessageBox.warning(self, "Ошибка", "Выберите книгу")
-        text = self.book_combo.currentText()
-        book_name = text.split(" (ID: ")[0]
-        book_id = int(text.split("ID: ")[1][:-1])
-
-        reply = QMessageBox.question(
-            self,
-            "Подтверждение",
-            f"Сделать ВСЕ страницы книги «{book_name}» шаблонами?\nЭто нельзя отменить массово.",
-            QMessageBox.Yes | QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        url = self.url_edit.text().strip().rstrip("/")
-        token = self.token_edit.text().strip()
-        headers = {"Authorization": f"Token {token}"}
-
-        self.make_templates_btn.setEnabled(False)
-        self.progress.setValue(0)
-        self.progress.setFormat("Помечаем как шаблоны...")
-        self.log_text.clear()
-
-        self.template_worker = TemplateMarkerWorker(url, headers, book_id)
-        self.template_worker.progress.connect(
-            lambda v, s: (self.progress.setValue(v), self.progress.setFormat(s))
-        )
-        self.template_worker.log.connect(
-            lambda m, c: self.log_text.append(f'<font color="{c}">{m}</font>')
-        )
-        self.template_worker.finished.connect(
-            lambda s, t: (
-                self.make_templates_btn.setEnabled(True),
-                QMessageBox.information(
-                    self, "Готово", f"Помечено как шаблоны: {s} из {t}"
-                ),
-            )
-        )
-        self.template_worker.start()
-
     def upload_to_bookstack(self):
         url, token = self.url_edit.text().strip(), self.token_edit.text().strip()
         if not all([url, token]):
@@ -762,7 +727,6 @@ class BookStackWidget(QWidget):
             book_id,
             file_groups,
             auto_tags=self.auto_tags_cb.isChecked(),
-            make_template=self.template_cb.isChecked(),
             manual_tags=manual_tags_by_name,
         )
         self.worker.progress.connect(

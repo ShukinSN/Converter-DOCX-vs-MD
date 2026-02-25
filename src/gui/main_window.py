@@ -20,7 +20,6 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QPushButton,
     QProgressBar,
@@ -109,7 +108,6 @@ class DocxToMarkdownConverter(QMainWindow):
         self.file_table.setColumnWidth(3, 60)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.file_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.file_table.itemChanged.connect(self.on_item_changed)
 
         files_table_layout.addWidget(self.file_table)
         files_main_layout.addLayout(files_table_layout, stretch=1)
@@ -195,6 +193,7 @@ class DocxToMarkdownConverter(QMainWindow):
         self.browse_btn.clicked.connect(self.browse_output)
         self.open_folder_btn.clicked.connect(self.open_output_folder)
         self.output_path_edit.textChanged.connect(self.update_open_folder_btn_state)
+        self.file_table.itemChanged.connect(self.on_item_changed)
 
         # --- Добавление в layout ---
         conv_layout.addWidget(files_group)
@@ -219,25 +218,48 @@ class DocxToMarkdownConverter(QMainWindow):
         # По умолчанию — тёмная тема
         self.change_theme("dark")
 
-    # --------------------------------------------------------------------- #
-    #   Добавление файлов
-    # --------------------------------------------------------------------- #
+    # ===================================================================== #
+    #   Добавление файлов и папок с естественной сортировкой
+    # ===================================================================== #
+
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
             self, "Выберите DOCX файлы", "", "DOCX Files (*.docx)"
         )
+        added = False
         for file in files:
             if not self.file_exists_in_table(file):
                 self.add_file_row(file, None)
+                added = True
+
+        if added:
+            self._sort_table_naturally()
 
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Выберите папку")
         if not folder:
             return
-        base_folder = Path(folder)
-        for file_path in base_folder.rglob("*.docx"):
-            if not self.file_exists_in_table(str(file_path)):
-                self.add_file_row(str(file_path), str(base_folder))
+
+        folder_path = Path(folder)
+        docx_files = list(folder_path.glob("*.docx"))
+
+        # === ЕСТЕСТВЕННАЯ СОРТИРОВКА ===
+        def natural_sort_key(p: Path):
+            return [
+                int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)
+            ]
+
+        docx_files.sort(key=natural_sort_key)
+
+        added = False
+        for file in docx_files:
+            file_str = str(file)
+            if not self.file_exists_in_table(file_str):
+                self.add_file_row(file_str, str(folder_path))
+                added = True
+
+        if added:
+            self._sort_table_naturally()
 
     def file_exists_in_table(self, file_path: str) -> bool:
         for row in range(self.file_table.rowCount()):
@@ -274,9 +296,81 @@ class DocxToMarkdownConverter(QMainWindow):
         letter_edit.setFixedWidth(50)
         letter_edit.setEnabled(False)
         letter_edit.setText("А")
-        letter_edit.textChanged.connect(lambda: self.on_letter_changed(row))
+        # Подключаем сигнал с передачей строки
+        letter_edit.textChanged.connect(
+            lambda text, r=row: self.on_letter_changed(r, text)
+        )
         self.file_table.setCellWidget(row, 3, letter_edit)
 
+    def _sort_table_naturally(self):
+        """Полная пересортировка таблицы по естественному порядку имён файлов"""
+        rows = []
+        for row in range(self.file_table.rowCount()):
+            name_item = self.file_table.item(row, 1)
+            if not name_item:
+                continue
+
+            filename = name_item.text()
+            file_path = name_item.data(Qt.UserRole)
+            base_folder = name_item.data(Qt.UserRole + 1)
+
+            app_item = self.file_table.item(row, 2)
+            is_app = app_item.checkState() == Qt.Checked if app_item else False
+
+            letter = "А"
+            if is_app:
+                letter_widget = self.file_table.cellWidget(row, 3)
+                if letter_widget:
+                    letter = letter_widget.text().strip().upper() or "А"
+
+            rows.append((filename, file_path, base_folder, is_app, letter))
+
+        # Естественная сортировка
+        def natural_key(tup):
+            return [
+                int(s) if s.isdigit() else s.lower() for s in re.split(r"(\d+)", tup[0])
+            ]
+
+        rows.sort(key=natural_key)
+
+        # Перезаполняем таблицу
+        self.file_table.setRowCount(0)
+        for filename, file_path, base_folder, is_app, letter in rows:
+            row = self.file_table.rowCount()
+            self.file_table.insertRow(row)
+
+            # Чекбокс удаления
+            del_cb = QTableWidgetItem()
+            del_cb.setCheckState(Qt.Unchecked)
+            del_cb.setData(Qt.UserRole, file_path)
+            self.file_table.setItem(row, 0, del_cb)
+
+            # Имя файла
+            name_item = QTableWidgetItem(filename)
+            name_item.setData(Qt.UserRole, file_path)
+            name_item.setData(Qt.UserRole + 1, base_folder)
+            self.file_table.setItem(row, 1, name_item)
+
+            # Приложение
+            app_cb = QTableWidgetItem()
+            app_cb.setCheckState(Qt.Checked if is_app else Qt.Unchecked)
+            app_cb.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            self.file_table.setItem(row, 2, app_cb)
+
+            # Буква
+            letter_edit = QLineEdit()
+            letter_edit.setMaxLength(2)
+            letter_edit.setFixedWidth(50)
+            letter_edit.setEnabled(is_app)
+            letter_edit.setText(letter)
+            letter_edit.textChanged.connect(
+                lambda text, r=row: self.on_letter_changed(r, text)
+            )
+            self.file_table.setCellWidget(row, 3, letter_edit)
+
+    # --------------------------------------------------------------------- #
+    #   Обработчики чекбоксов и полей
+    # --------------------------------------------------------------------- #
     def on_item_changed(self, item):
         if item.column() == 2:  # Чекбокс "Приложение"
             row = item.row()
@@ -287,15 +381,15 @@ class DocxToMarkdownConverter(QMainWindow):
                 if enabled and not letter_edit.text().strip():
                     letter_edit.setText("А")
 
-    def on_letter_changed(self, row: int):
+    def on_letter_changed(self, row: int, text: str):
         letter_edit = self.file_table.cellWidget(row, 3)
-        text = letter_edit.text().strip().upper()
-        if text and len(text) > 1:
-            text = text[0]
-        letter_edit.setText(text)
+        if letter_edit:
+            cleaned = text.strip().upper()[:2]
+            if cleaned != text:
+                letter_edit.setText(cleaned)
 
     # --------------------------------------------------------------------- #
-    #   Удаление
+    #   Удаление и очистка
     # --------------------------------------------------------------------- #
     def remove_selected(self):
         rows_to_remove = [
@@ -330,12 +424,12 @@ class DocxToMarkdownConverter(QMainWindow):
         for row in range(self.file_table.rowCount()):
             name_item = self.file_table.item(row, 1)
             app_item = self.file_table.item(row, 2)
-            letter_edit = self.file_table.cellWidget(row, 3)
+            letter_widget = self.file_table.cellWidget(row, 3)
 
             file_path = name_item.data(Qt.UserRole)
             base_folder = name_item.data(Qt.UserRole + 1)
             is_appendix = app_item.checkState() == Qt.Checked
-            appendix_letter = letter_edit.text().upper() if is_appendix else "А"
+            appendix_letter = letter_widget.text().upper() if is_appendix else "А"
 
             meta = (file_path, base_folder, is_appendix, appendix_letter)
             files_with_meta.append(meta)
@@ -406,7 +500,10 @@ class DocxToMarkdownConverter(QMainWindow):
                 input_path = Path(file_path)
                 rel_dir = Path()
                 if base_folder and input_path.parent != Path(base_folder):
-                    rel_dir = input_path.parent.relative_to(base_folder)
+                    try:
+                        rel_dir = input_path.parent.relative_to(base_folder)
+                    except ValueError:
+                        pass
                 md_path = (
                     output_root / rel_dir / f"{sanitize_filename(input_path.stem)}.md"
                 )
@@ -416,25 +513,12 @@ class DocxToMarkdownConverter(QMainWindow):
             if not md_paths:
                 continue
 
-            if has_folders:
-                name = chapter_name if chapter_name != "NoChapter" else "Без главы"
-                self.converted_files[name] = md_paths
-            else:
-                self.converted_files = md_paths
-                break
-        else:
-            if not has_folders and not self.converted_files:
-                md_paths = []
-                for row in range(self.file_table.rowCount()):
-                    item = self.file_table.item(row, 1)
-                    if item:
-                        input_path = Path(item.data(Qt.UserRole))
-                        md_path = (
-                            output_root / f"{sanitize_filename(input_path.stem)}.md"
-                        )
-                        if md_path.exists():
-                            md_paths.append(str(md_path))
-                self.converted_files = md_paths
+            name = chapter_name if chapter_name != "NoChapter" else "Без главы"
+            self.converted_files[name] = md_paths
+
+        # Если нет папок — просто список файлов
+        if not has_folders and len(self.converted_files) == 1:
+            self.converted_files = list(self.converted_files.values())[0]
 
         self.bookstack_widget.converted_files = self.converted_files
         self.bookstack_widget.update_file_list()

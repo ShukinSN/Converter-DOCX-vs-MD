@@ -33,7 +33,7 @@ class EnhancedConverterThread(QThread):
         self._is_running = True
         self.successful_files = []
 
-        # === Нормализация входных данных: поддержка (path, base_folder, is_appendix, letter) ===
+        # === Нормализация входных данных ===
         self.files_with_meta = []
         for item in files:
             if isinstance(item, str):
@@ -46,24 +46,77 @@ class EnhancedConverterThread(QThread):
             else:
                 raise ValueError(f"Неподдерживаемый формат элемента: {item}")
 
-        # Автоматическое назначение букв для приложений
         self._assign_appendix_letters()
 
     def _assign_appendix_letters(self):
-        """Безопасно назначает буквы приложениям, если они не заданы вручную."""
         appendix_indices = [i for i, meta in enumerate(self.files_with_meta) if meta[2]]
-
         for pos, idx in enumerate(appendix_indices):
             if self.files_with_meta[idx][3].strip():
-                continue  # буква уже указана вручную
-
+                continue
             letter_index = pos % len(self.RUSSIAN_LETTERS)
             letter = self.RUSSIAN_LETTERS[letter_index]
-
             if pos >= len(self.RUSSIAN_LETTERS):
                 letter += str((pos // len(self.RUSSIAN_LETTERS)) + 1)
-
             self.files_with_meta[idx][3] = letter
+
+    # ──────────────────────────────────────────────────────────────
+    # НОВАЯ ФУНКЦИЯ: превращаем blockquotes → кодовые блоки
+    # ──────────────────────────────────────────────────────────────
+    def _convert_blockquotes_to_code(self, md_path: Path):
+        """
+        После конвертации Pandoc часто делает из отступов в Word цитаты (>).
+        Мы превращаем их в настоящие кодовые блоки (4 пробела или ```).
+        """
+        try:
+            content = md_path.read_text(encoding="utf-8")
+
+            # Регулярное выражение ищет блоки цитат (включая вложенные)
+            # Группа 1 — содержимое блока без ведущих >
+            def replacer(match):
+                block = match.group(0)
+                lines = block.split("\n")
+                code_lines = [
+                    line.lstrip("> ").rstrip() for line in lines if line.strip()
+                ]
+                code_block = "\n".join("    " + line for line in code_lines)
+                return code_block + "\n"
+
+            # Заменяем все цитаты, идущие подряд (многострочные блоки)
+            # Паттерн: строки, начинающиеся с > (может быть несколько пробелов после >)
+            new_content = re.sub(
+                r"^([ \t]*>(?:[ \t].*)?(?:\n|$))+",
+                replacer,
+                content,
+                flags=re.MULTILINE,
+            )
+
+            # Иногда Pandoc оставляет пустые строки с > — чистим их
+            new_content = re.sub(
+                r"^[ \t]*>\s*$(\n|$)", "", new_content, flags=re.MULTILINE
+            )
+
+            # ─────────────────────── ДОПОЛНИТЕЛЬНО: Обрабатываем inline-команды в «кавычках» → `code` ───────────────────────
+            # Заменяем «команда» на `команда`, если это выглядит как CLI-команда (содержит @, #, config, interface и т.д.)
+            def inline_replacer(match):
+                cmd = match.group(1).strip()
+                # Проверка: если это команда (адаптируйте под ваши документы)
+                if re.search(
+                    r"[@#]|config|interface|vlan|ip|admin|administrator|Switch|exit|end|show|write|no",
+                    cmd,
+                    re.IGNORECASE,
+                ):
+                    return f"`{cmd}`"
+                return match.group(0)  # Оставляем как есть, если не команда
+
+            new_content = re.sub(r"«(.*?)»", inline_replacer, new_content)
+
+            # ─────────────────────────────────────────────────────────────────────
+
+            md_path.write_text(new_content, encoding="utf-8")
+        except Exception as e:
+            self.error_occurred.emit(f"Ошибка обработки цитат → код: {e}")
+
+    # ──────────────────────────────────────────────────────────────
 
     def run(self):
         total = len(self.files_with_meta)
@@ -87,33 +140,28 @@ class EnhancedConverterThread(QThread):
                 if not input_path.exists():
                     raise FileNotFoundError(f"Файл не найден: {input_path}")
 
-                # === Выходная папка ===
                 output_root = Path(self.output_folder)
                 output_root.mkdir(parents=True, exist_ok=True)
 
-                # Определяем относительную структуру папок
                 rel_dir = Path()
                 if base_folder_str:
                     try:
                         rel_dir = input_path.parent.relative_to(Path(base_folder_str))
                     except ValueError:
-                        pass  # если не в базовой папке — просто в корень
+                        pass
 
                 output_dir = output_root / rel_dir
                 output_dir.mkdir(parents=True, exist_ok=True)
                 images_dir = output_dir / "images"
                 images_dir.mkdir(exist_ok=True)
 
-                # Имя файла — без префикса [А], [Б] и т.п.
                 safe_name = sanitize_filename(input_path.stem)
                 output_path = output_dir / f"{safe_name}.md"
 
-                # Защита от слишком длинных путей (Windows)
                 if len(str(output_path)) > 240:
                     safe_name = safe_name[:100] + "..."
                     output_path = output_dir / f"{safe_name}.md"
 
-                # Пропуск, если файл существует и перезапись отключена
                 if output_path.exists() and not self.options.get("overwrite"):
                     success_count += 1
                     self.conversion_finished.emit(
@@ -121,11 +169,9 @@ class EnhancedConverterThread(QThread):
                         f"Пропущено (уже существует): {safe_name}.md",
                         str(output_path),
                     )
-                    self.progress_updated.emit(int((i + 1) / total * 100), filename)
                     continue
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
-                    # === Конвертация через pandoc ===
                     extra_args = [
                         f"--extract-media={tmp_dir}",
                         "--wrap=none",
@@ -144,94 +190,80 @@ class EnhancedConverterThread(QThread):
                         extra_args=extra_args,
                     )
 
-                    # === УДАЛЕНИЕ ЭКРАНИРОВАНИЯ HTML-КОММЕНТАРИЕВ ===
+                    # Убираем экранирование комментариев
                     try:
-                        with open(output_path, "r", encoding="utf-8") as f:
-                            content = f.read()
-
-                        # Основные замены: \<!-- → <!-- и --\> → -->
-                        content = content.replace(r"\<!--", "<!--")
-                        content = content.replace(r"--\>", "-->")
-
-                        # Дополнительно — на случай, если pandoc экранирует < и > отдельно
+                        content = output_path.read_text(encoding="utf-8")
+                        content = content.replace(r"\<!--", "<!--").replace(
+                            r"--\>", "-->"
+                        )
                         content = content.replace(r"\<", "<").replace(r"\>", ">")
-
-                        with open(output_path, "w", encoding="utf-8") as f:
-                            f.write(content)
+                        output_path.write_text(content, encoding="utf-8")
                     except Exception as e:
                         self.error_occurred.emit(f"Ошибка снятия экранирования: {e}")
 
-                    # === ПОСТОБРАБОТКА: изображения, таблицы, ссылки, стили ===
-                    try:
-                        # Обработка изображений и таблиц
-                        process_images(
+                    # ─────────────────────── ПОСТОБРАБОТКА ───────────────────────
+                    process_images(
+                        output_path,
+                        tmp_dir,
+                        self.project_root,
+                        images_dir,
+                        is_appendix=is_appendix,
+                        appendix_letter=appendix_letter,
+                    )
+                    process_tables(
+                        output_path,
+                        self.project_root,
+                        is_appendix=is_appendix,
+                        appendix_letter=appendix_letter,
+                    )
+
+                    rules = {}
+                    media_dir = Path(tmp_dir) / "media"
+                    if media_dir.exists():
+                        for img in media_dir.iterdir():
+                            if img.suffix.lower() in {
+                                ".png",
+                                ".jpg",
+                                ".jpeg",
+                                ".gif",
+                                ".emf",
+                            }:
+                                if img.suffix.lower() == ".emf":
+                                    png_path = convert_emf_to_png(img)
+                                    if png_path:
+                                        shutil.copy2(
+                                            png_path, images_dir / png_path.name
+                                        )
+                                        rules[f"media/{img.name}"] = (
+                                            f"images/{png_path.name}"
+                                        )
+                                else:
+                                    shutil.copy2(img, images_dir / img.name)
+                                    rules[f"media/{img.name}"] = f"images/{img.name}"
+                    if rules:
+                        replace_image_links(output_path, rules)
+
+                    if self.options.get("toc"):
+                        fix_links_and_toc(output_path)
+
+                    # ─────────────────────── НОВАЯ ОБРАБОТКА ЦИТАТ → КОД ───────────────────────
+                    self._convert_blockquotes_to_code(output_path)
+                    # ─────────────────────────────────────────────────────────────────────
+
+                    has_figures = "figure-container" in output_path.read_text(
+                        encoding="utf-8"
+                    )
+                    has_tables = "table-caption" in output_path.read_text(
+                        encoding="utf-8"
+                    )
+                    if has_figures or has_tables:
+                        append_or_update_styles(
                             output_path,
-                            tmp_dir,
                             self.project_root,
-                            images_dir,
+                            has_figures,
+                            has_tables,
                             is_appendix=is_appendix,
                             appendix_letter=appendix_letter,
-                        )
-                        process_tables(
-                            output_path,
-                            self.project_root,
-                            is_appendix=is_appendix,
-                            appendix_letter=appendix_letter,
-                        )
-
-                        # Замена ссылок на изображения из media → images
-                        rules = {}
-                        media_dir = Path(tmp_dir) / "media"
-                        if media_dir.exists():
-                            for img in media_dir.iterdir():
-                                if img.suffix.lower() in {
-                                    ".png",
-                                    ".jpg",
-                                    ".jpeg",
-                                    ".gif",
-                                    ".emf",
-                                }:
-                                    old = f"media/{img.name}"
-                                    if img.suffix.lower() == ".emf":
-                                        png_path = convert_emf_to_png(img)
-                                        if png_path:
-                                            shutil.copy2(
-                                                png_path, images_dir / png_path.name
-                                            )
-                                            rules[old] = f"images/{png_path.name}"
-                                    else:
-                                        shutil.copy2(img, images_dir / img.name)
-                                        rules[old] = f"images/{img.name}"
-                        if rules:
-                            replace_image_links(output_path, rules)
-
-                        # Оглавление
-                        if self.options.get("toc"):
-                            fix_links_and_toc(output_path)
-
-                        # Добавление стилей
-                        content = output_path.read_text(encoding="utf-8-sig")
-                        has_figures = any(
-                            tag in content
-                            for tag in ["figure-container", "app-container"]
-                        )
-                        has_tables = any(
-                            tag in content
-                            for tag in ["table-caption", "app_table-caption"]
-                        )
-                        if has_figures or has_tables:
-                            append_or_update_styles(
-                                output_path,
-                                self.project_root,
-                                has_figures,
-                                has_tables,
-                                is_appendix=is_appendix,
-                                appendix_letter=appendix_letter,
-                            )
-
-                    except Exception as e:
-                        self.error_occurred.emit(
-                            f"Ошибка постобработки ({filename}): {e}"
                         )
 
                     success_count += 1
