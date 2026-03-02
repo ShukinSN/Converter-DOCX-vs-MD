@@ -1,6 +1,7 @@
 # src/gui/bookstack_widget.py
 from PyQt5.QtWidgets import (
     QWidget,
+    QDialog,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
@@ -16,8 +17,6 @@ from PyQt5.QtWidgets import (
     QTextEdit,
     QProgressBar,
     QStyledItemDelegate,
-    QDialog,
-    QDialogButtonBox,
     QHeaderView,
 )
 from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QSettings
@@ -25,7 +24,6 @@ from PyQt5.QtGui import QIcon, QFont
 from pathlib import Path
 import os
 import re
-import resources_rc
 
 from converter.bookstack_api import (
     get_shelves,
@@ -40,23 +38,26 @@ from tagger.smart_tagger import SmartTagger
 from tagger.book_tagger import BookStackBookTagger
 
 
-# Делегат: редактирование только колонки с тегами
+# Делегат: редактирование только колонок 1 и 2 (Тег системы и Спец. тег)
 class TagsDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
-        if index.column() == 1:
+        if index.column() in (1, 2):
             editor = QLineEdit(parent)
-            editor.setPlaceholderText("Введите тег...")
+            if index.column() == 1:
+                editor.setPlaceholderText("Значение для system (через запятую)")
+            else:
+                editor.setPlaceholderText("Значение для special (через запятую)")
             return editor
         return super().createEditor(parent, option, index)
 
     def setEditorData(self, editor, index):
-        if index.column() == 1:
+        if index.column() in (1, 2):
             editor.setText(index.data(Qt.EditRole) or "")
         else:
             super().setEditorData(editor, index)
 
     def setModelData(self, editor, model, index):
-        if index.column() == 1:
+        if index.column() in (1, 2):
             model.setData(index, editor.text().strip(), Qt.EditRole)
         else:
             super().setModelData(editor, model, index)
@@ -108,7 +109,7 @@ class UploadWorker(QThread):
                     log_callback=lambda m, c="black": self.log.emit(m, c),
                     chapter_id=None,
                     auto_tags=self.auto_tags and not manual,
-                    manual_tags=manual,
+                    manual_tags=manual,  # Передаем список словарей
                 )
                 if ok:
                     success += 1
@@ -153,7 +154,7 @@ class UploadWorker(QThread):
                     log_callback=lambda m, c="black": self.log.emit(m, c),
                     chapter_id=chapter_id,
                     auto_tags=self.auto_tags and not manual,
-                    manual_tags=manual,
+                    manual_tags=manual,  # Передаем список словарей
                 )
                 if ok:
                     success += 1
@@ -324,20 +325,23 @@ class BookStackWidget(QWidget):
         upload_g.setLayout(ul)
         left.addWidget(upload_g)
 
-        # Файлы и теги — ГЛАВНОЕ УЛУЧШЕНИЕ
+        # Файлы и теги
         file_g = QGroupBox("Файлы и теги")
         fl = QHBoxLayout()
 
         self.file_list = QTreeWidget()
-        self.file_list.setColumnCount(2)
-        self.file_list.setHeaderLabels(["Файл", "Теги (через запятую)"])
+        self.file_list.setColumnCount(3)
+        self.file_list.setHeaderLabels(
+            ["Файл", "Тег системы(system)", "Спец. тег(special)"]
+        )
         self.file_list.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.file_list.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.file_list.header().setSectionResizeMode(2, QHeaderView.Stretch)
         self.file_list.setAlternatingRowColors(True)
         self.file_list.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.file_list.setRootIsDecorated(True)
         self.file_list.setIndentation(20)
-        self.file_list.setItemDelegateForColumn(1, TagsDelegate())
+        self.file_list.setItemDelegate(TagsDelegate())
 
         fl.addWidget(self.file_list, 1)
 
@@ -389,43 +393,46 @@ class BookStackWidget(QWidget):
         log_g.setLayout(ll)
         main_layout.addWidget(log_g)
 
-    # Обновление списка
     def update_file_list(self):
         self.file_list.clear()
-
         try:
             self.file_list.itemChanged.disconnect()
         except:
             pass
 
         if isinstance(self.converted_files, list):
-
             for p in self.converted_files:
                 self._add_file_item(str(p))
         elif isinstance(self.converted_files, dict):
-
             for chapter_name, files in self.converted_files.items():
                 if not files:
                     continue
                 chapter_item = QTreeWidgetItem(
-                    [f"Глава: {chapter_name} ({len(files)} файлов)", ""]
+                    [f"Глава: {chapter_name} ({len(files)} файлов)", "", ""]
                 )
                 chapter_item.setBackground(0, Qt.lightGray)
                 chapter_item.setBackground(1, Qt.lightGray)
+                chapter_item.setBackground(2, Qt.lightGray)
                 chapter_item.setFlags(Qt.ItemIsEnabled)
                 self.file_list.addTopLevelItem(chapter_item)
                 for p in files:
                     self._add_file_item(str(p), parent=chapter_item)
 
-        # Подключаем сигнал обратно
         self.file_list.itemChanged.connect(self.on_item_changed)
 
     def _add_file_item(self, path_str, parent=None):
         path = Path(path_str)
-        item = QTreeWidgetItem()
-        item.setText(0, path.name)
+        item = QTreeWidgetItem([path.name, "", ""])
         item.setData(0, Qt.UserRole, path_str)
-        item.setText(1, self.manual_tags_dict.get(path_str, ""))
+
+        # Восстанавливаем value через запятую
+        tags = self.manual_tags_dict.get(path_str, [])
+        system_values = ", ".join(t["value"] for t in tags if t["name"] == "system")
+        special_values = ", ".join(t["value"] for t in tags if t["name"] == "special")
+
+        item.setText(1, system_values)
+        item.setText(2, special_values)
+
         item.setFlags(item.flags() | Qt.ItemIsEditable)
 
         if parent:
@@ -434,26 +441,44 @@ class BookStackWidget(QWidget):
             self.file_list.addTopLevelItem(item)
 
     def on_item_changed(self, item, column):
-        if column != 1:
+        if column not in (1, 2):
             return
+
         path = item.data(0, Qt.UserRole)
         if not path:
             return
-        tags = item.text(1).strip()
+
+        # Собираем теги из обеих колонок
+        tags = []
+
+        # Колонка 1: system
+        system_text = item.text(1).strip()
+        if system_text:
+            values = [v.strip() for v in system_text.split(",") if v.strip()]
+            for v in values:
+                tags.append({"name": "system", "value": v, "order": 0})
+
+        # Колонка 2: special
+        special_text = item.text(2).strip()
+        if special_text:
+            values = [v.strip() for v in special_text.split(",") if v.strip()]
+            for v in values:
+                tags.append({"name": "special", "value": v, "order": 0})
+
         if tags:
             self.manual_tags_dict[path] = tags
-        elif path in self.manual_tags_dict:
-            del self.manual_tags_dict[path]
+        else:
+            self.manual_tags_dict.pop(path, None)
 
     def toggle_new_shelf(self, state):
         self.new_shelf_edit.setEnabled(state == Qt.Checked)
         self.create_shelf_btn.setEnabled(state == Qt.Checked)
-        self.shelf_combo.setEnabled(not (state == Qt.Checked))
+        self.shelf_combo.setEnabled(state != Qt.Checked)
 
     def toggle_new_book(self, state):
         self.new_book_edit.setEnabled(state == Qt.Checked)
         self.create_book_btn.setEnabled(state == Qt.Checked)
-        self.book_combo.setEnabled(not (state == Qt.Checked))
+        self.book_combo.setEnabled(state != Qt.Checked)
 
     def create_shelf(self):
         name = self.new_shelf_edit.text().strip()
@@ -520,20 +545,17 @@ class BookStackWidget(QWidget):
             return
         if files:
             self.last_path = str(Path(files[0]).parent)
-            self.save_settings()
+            self.settings.setValue("bookstack_last_path", self.last_path)
 
-        # Сортируем файлы перед добавлением
         sorted_files = sorted(files, key=natural_sort_key)
 
         if isinstance(self.converted_files, list):
             self.converted_files.extend(sorted_files)
-            # Сортируем весь список
             self.converted_files.sort(key=natural_sort_key)
         elif isinstance(self.converted_files, dict):
             if "Без главы" not in self.converted_files:
                 self.converted_files["Без главы"] = []
             self.converted_files["Без главы"].extend(sorted_files)
-            # Сортируем файлы в главе
             self.converted_files["Без главы"].sort(key=natural_sort_key)
         else:
             self.converted_files = sorted_files[:]
@@ -545,7 +567,7 @@ class BookStackWidget(QWidget):
         if not folder:
             return
         self.last_path = folder
-        self.save_settings()
+        self.settings.setValue("bookstack_last_path", self.last_path)
         folder_path = Path(folder)
         md_files = [
             str(folder_path / f) for f in os.listdir(folder) if f.endswith(".md")
@@ -554,7 +576,6 @@ class BookStackWidget(QWidget):
             QMessageBox.information(self, "Пусто", "Нет .md файлов")
             return
 
-        # Сортируем файлы из папки
         md_files.sort(key=natural_sort_key)
 
         folder_name = folder_path.name
@@ -562,7 +583,6 @@ class BookStackWidget(QWidget):
             self.converted_files = {}
         self.converted_files[folder_name] = md_files
 
-        # Сортируем структуру
         self.converted_files = self._sort_converted_files(self.converted_files)
         self.update_file_list()
 
@@ -580,7 +600,6 @@ class BookStackWidget(QWidget):
             self.converted_files = [
                 p for p in self.converted_files if p not in paths_to_remove
             ]
-            # После удаления пересортируем
             self.converted_files.sort(key=natural_sort_key)
         elif isinstance(self.converted_files, dict):
             for ch in list(self.converted_files.keys()):
@@ -590,7 +609,6 @@ class BookStackWidget(QWidget):
                 if not self.converted_files[ch]:
                     del self.converted_files[ch]
                 else:
-                    # Сортируем файлы в главе после удаления
                     self.converted_files[ch].sort(key=natural_sort_key)
 
         self.update_file_list()
@@ -610,13 +628,6 @@ class BookStackWidget(QWidget):
             self.manual_tags_dict.clear()
             self.update_file_list()
 
-    def save_settings(self):
-        self.settings.setValue("bookstack_last_path", self.last_path)
-
-    def closeEvent(self, event):
-        self.save_settings()
-        super().closeEvent(event)
-
     def show_tag_preview(self):
         if not self.converted_files:
             return QMessageBox.information(self, "Инфо", "Нет файлов")
@@ -628,14 +639,15 @@ class BookStackWidget(QWidget):
         preview = "<b>Предпросмотр тегов:</b><br><br>"
         for p in files:
             auto = self.tagger.get_document_tags(Path(p))
-            manual = (
-                self.manual_tags_dict.get(p, "").split(", ")
-                if self.manual_tags_dict.get(p)
-                else []
+            manual = self.manual_tags_dict.get(p, [])
+            tags = (
+                manual
+                if manual
+                else [{"name": "system", "value": t, "order": 0} for t in auto]
             )
-            tags = manual or auto
             src = "Ручные" if manual else "Авто"
-            preview += f"<b>{Path(p).name}</b> ({src})<br> → {', '.join(tags) if tags else '—'}<br><br>"
+            tags_str = "<br>".join(f"• {t['name']}: {t['value']}" for t in tags) or "—"
+            preview += f"<b>{Path(p).name}</b> ({src})<br>{tags_str}<br><br>"
         dlg = QDialog(self)
         dlg.setWindowTitle("Предпросмотр тегов")
         dlg.resize(800, 600)
@@ -644,8 +656,8 @@ class BookStackWidget(QWidget):
         te.setHtml(preview)
         te.setReadOnly(True)
         l.addWidget(te)
-        btn = QDialogButtonBox(QDialogButtonBox.Ok)
-        btn.accepted.connect(dlg.accept)
+        btn = QPushButton("Закрыть")
+        btn.clicked.connect(dlg.accept)
         l.addWidget(btn)
         dlg.exec_()
 
@@ -703,9 +715,8 @@ class BookStackWidget(QWidget):
 
         # Ручные теги
         manual_tags_by_name = {}
-        for path, tags_str in self.manual_tags_dict.items():
+        for path, tags in self.manual_tags_dict.items():
             filename = Path(path).name
-            tags = [t.strip() for t in tags_str.split(",") if t.strip()]
             if tags:
                 manual_tags_by_name[filename] = tags
 

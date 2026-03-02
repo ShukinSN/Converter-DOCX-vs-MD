@@ -208,7 +208,7 @@ def upload_md_with_images(
     auto_tags: bool = True,
     make_template: bool = False,
     chapter_id: int | None = None,
-    manual_tags: list[str] = None,  # ← НОВЫЙ ПАРАМЕТР
+    manual_tags: list | None = None,  # Исправлено: list вместо list[str]
 ) -> bool:
     md_path = Path(md_path)
     if not md_path.exists():
@@ -224,16 +224,28 @@ def upload_md_with_images(
         # === ТЕГИ: РУЧНЫЕ ИМЕЮТ ПРИОРИТЕТ ===
         tags = []
         if manual_tags:
-            tags = [{"name": t, "value": ""} for t in manual_tags]
+            # manual_tags уже должен быть списком словарей
+            tags = manual_tags
             if log_callback:
-                log_callback(f"Ручные теги: {', '.join(manual_tags)}", "blue")
+                # Безопасное преобразование словарей в строки для лога
+                tag_strings = []
+                for tag in manual_tags:
+                    if isinstance(tag, dict):
+                        tag_strings.append(
+                            f"{tag.get('name', '')}:{tag.get('value', '')}"
+                        )
+                    else:
+                        tag_strings.append(str(tag))
+                log_callback(f"Ручные теги: {', '.join(tag_strings)}", "blue")
         elif auto_tags:
             try:
                 from tagger.smart_tagger import SmartTagger
 
                 tagger = SmartTagger()
                 raw_tags = tagger.get_document_tags(md_path, md_content)
-                tags = [{"name": t, "value": ""} for t in raw_tags]
+                tags = [
+                    {"name": "system", "value": tag, "order": 0} for tag in raw_tags
+                ]
                 if log_callback:
                     log_callback(f"Авто-теги: {', '.join(raw_tags)}", "blue")
             except Exception as e:
